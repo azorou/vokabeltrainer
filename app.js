@@ -237,8 +237,8 @@ function extractSentence(lines) {
 }
 
 function parseTable(rawWords) {
-    const words = rawWords
-        .map((w) => ({ t: (w.text || '').trim(), x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0, y1: w.bbox.y1 }))
+        const words = rawWords
+        .map((w) => ({ t: (w.text || '').trim(), c: w.confidence, x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0, y1: w.bbox.y1 }))
         .filter((w) => w.t && !/^[!|•·]+$/.test(w.t));
     if (words.length < 6) return [];
     words.forEach((w) => { w.yc = (w.y0 + w.y1) / 2; });
@@ -277,15 +277,69 @@ function parseTable(rawWords) {
 
     const entries = [];
     anchors.forEach((a, i) => {
-        const row = { a, top: a.yc - tol, end: anchors[i + 1] ? anchors[i + 1].yc - tol : Infinity };
-        const en = parseHeadword(collect(l1, row).join(' '));
-        const de = joinHyphenated(collect(l2, row)).replace(/[|!•]/g, '').trim();
-        const sentence = extractSentence(collect(l3, row)).replace(/\|/g, 'I');
-        if (/^[A-Za-z]/.test(en) && en.split(' ').length <= 6 && de.length > 1 && sentence.length > 5) {
-            entries.push({ en, de, sentence });
+                   const inRow = (arr) => arr.filter((w) => w.yc >= row.top && w.yc < row.end);
+            const enConf = Math.min(100, ...inRow(cols[0]).map((w) => w.c ?? 100));
+            const sentConf = {};
+            inRow(cols[2]).forEach((w) => {
+                const k = w.t.toLowerCase().replace(/[^\p{L}]/gu, '');
+                sentConf[k] = Math.min(sentConf[k] ?? 100, w.c ?? 100);
+            });
+            entries.push(refineEntry({ en, de, sentence }, enConf, sentConf));
         }
     });
     return entries;
+}
+
+/* ================= Kontext-Korrektur ================= */
+function refineEntry(e, enConf = 50, sentConf = {}) {
+    const notes = [];
+    const labels = { en: 'Englisch', de: 'Deutsch', sentence: 'Satz' };
+
+    // 1) typische OCR-Zeichenverwechslungen mitten im Wort
+    const fixChars = (s) => s
+        .replace(/(?<=\p{L})0(?=\p{L})/gu, 'o')
+        .replace(/(?<=\p{L})[1|](?=\p{L})/gu, 'l')
+        .replace(/(?<=\p{Ll})I(?=\p{Ll})/gu, 'l');
+    for (const key of ['en', 'de', 'sentence']) {
+        const fixed = fixChars(e[key]);
+        if (fixed !== e[key]) { notes.push(`${labels[key]}: „${e[key]}“ → „${fixed}“`); e[key] = fixed; }
+    }
+
+    // 2) Stichwort muss (auch gebeugt) im Beispielsatz vorkommen
+    const base = norm(e.en).split(' ')[0];
+    if (base.length >= 4) {
+        const stem = /[ey]$/.test(base) ? base.slice(0, -1) : base;
+        const tokens = e.sentence.match(/\p{L}+/gu) || [];
+        if (!tokens.some((t) => t.toLowerCase().startsWith(stem))) {
+            const maxD = base.length >= 8 ? 2 : 1;
+            let best = null;
+            for (const orig of tokens) {
+                const t = orig.toLowerCase();
+                for (const L of [base.length - 1, base.length, base.length + 1]) {
+                    if (L > t.length) continue;
+                    const d = levenshtein(t.slice(0, L), base);
+                    if (d >= 1 && d <= maxD && (!best || d < best.d)) best = { d, L, orig, t };
+                }
+            }
+            if (best) {
+                const tokConf = sentConf[best.t] ?? 100;
+                if (Math.min(enConf, tokConf) < 85) {          // nur bei unsicherer Erkennung
+                    const cand = best.t.slice(0, best.L);
+                    if (enConf <= tokConf) {                   // Stichwort ist das schwächere Glied
+                        const before = e.en;
+                        e.en = e.en.replace(new RegExp(`\\b${escapeRe(base)}\\b`, 'i'), cand);
+                        if (e.en !== before) notes.push(`Englisch: „${before}“ → „${e.en}“ (laut Beispielsatz)`);
+                    } else {                                   // Satzwort ist das schwächere Glied
+                        const fixedWord = base + best.orig.slice(best.L);
+                        e.sentence = e.sentence.replace(new RegExp(`\\b${escapeRe(best.orig)}\\b`), fixedWord);
+                        notes.push(`Satz: „${best.orig}“ → „${fixedWord}“ (laut Stichwort)`);
+                    }
+                }
+            }
+        }
+    }
+    if (notes.length) e.fix = notes;
+    return e;
 }
 
 /* ================= Bearbeitbare Liste ================= */
@@ -316,12 +370,18 @@ function renderList() {
             savePool();
             renderList();
         });
-        row.append(
+                row.append(
             makeInput(item, 'en', 'Englisch'),
             makeInput(item, 'de', 'Deutsch'),
             del,
             makeInput(item, 'sentence', 'Beispielsatz', 'full')
         );
+        if (item.fix && item.fix.length) {
+            const note = document.createElement('div');
+            note.className = 'fix-note';
+            note.textContent = `✎ Automatisch korrigiert: ${item.fix.join(' · ')}`;
+            row.append(note);
+        }
         box.append(row);
     });
 
