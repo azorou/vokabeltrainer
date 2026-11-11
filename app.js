@@ -76,56 +76,60 @@ function processOcrTextChunk(text) {
         let deWort = "";
         let satz = "";
         
-        // 1. Hauptstrategie: Suche nach den Lautschrift-Klammern [ ] oder / / als Spaltentrenner
-        let bracketMatch = line.match(/^(.*?)\s*[\[\/](.*?)[\]\/]\s*(.*)$/);
-        
-        if (bracketMatch) {
-            enWort = bracketMatch[1].trim();
-            let rest = bracketMatch[3].trim();
+        try {
+            // 1. Hauptstrategie: Suche nach den Lautschrift-Klammern [ ] oder / / als Spaltentrenner
+            let bracketMatch = line.match(/^(.*?)\s*[\[\/](.*?)[\]\/]\s*(.*)$/);
             
-            // Bereinige Zahlen am Zeilenanfang (z.B. "1 oral" -> "oral")
-            enWort = enWort.replace(/^\d+\s+/, '');
-            
-            // Trenne das Deutsche vom englischen Beispielsatz
-            let splitResult = splitGermanAndSentence(rest, enWort);
-            deWort = splitResult.de;
-            satz = splitResult.sentence;
-        } else {
-            // 2. Fallback: Falls keine Klammern da sind, trenne klassisch nach großen Lücken
-            let parts = line.split(/\s{2,}|\t|;|—/);
-            if (parts.length >= 2) {
-                enWort = parts[0].trim().replace(/^\d+\s+/, '');
-                deWort = parts[1].trim();
-                satz = parts.slice(2).join(" ").trim() || `Context: ${enWort}`;
-            }
-        }
-        
-        // Validierung: Wenn englisches und deutsches Fragment erfolgreich isoliert wurden
-        if (enWort.length > 1 && deWort.length > 1) {
-            let cleanEn = enWort.replace(/^to\s+/i, '').trim(); // Für die Überprüfung beim Abfragen
-            
-            if (!vocabularyPool.some(v => v.en.toLowerCase() === cleanEn.toLowerCase())) {
-                let vocItem = {
-                    de: deWort,
-                    en: cleanEn,
-                    fullEn: enWort,
-                    sentence: satz
-                };
+            if (bracketMatch && bracketMatch[1] && bracketMatch[3]) {
+                enWort = bracketMatch[1].trim();
+                let rest = bracketMatch[3].trim();
                 
-                vocabularyPool.push(vocItem);
-
-                let row = document.createElement('div');
-                row.className = 'scanned-item';
-                row.innerHTML = `<span><strong>${vocItem.fullEn}</strong> ➔ ${vocItem.de}</span>`;
-                container.appendChild(row);
+                // Bereinige Zahlen am Zeilenanfang (z.B. "1 oral" -> "oral")
+                enWort = enWort.replace(/^\d+\s+/, '');
+                
+                // Trenne das Deutsche vom englischen Beispielsatz
+                let splitResult = splitGermanAndSentence(rest, enWort);
+                deWort = splitResult.de;
+                satz = splitResult.sentence;
+            } else {
+                // 2. Fallback: Falls keine Klammern da sind, trenne nach großen Lücken
+                let parts = line.split(/\s{2,}|\t|;|—/);
+                if (parts.length >= 2) {
+                    enWort = parts[0].trim().replace(/^\d+\s+/, '');
+                    deWort = parts[1].trim();
+                    satz = parts.slice(2).join(" ").trim() || `Context: ${enWort}`;
+                }
             }
+            
+            // Validierung: Wenn englisches und deutsches Fragment isoliert wurden
+            if (enWort.length > 1 && deWort.length > 1) {
+                let cleanEn = enWort.replace(/^to\s+/i, '').trim(); // Für die Überprüfung beim Abfragen
+                
+                if (!vocabularyPool.some(v => v.en.toLowerCase() === cleanEn.toLowerCase())) {
+                    let vocItem = {
+                        de: deWort,
+                        en: cleanEn,
+                        fullEn: enWort,
+                        sentence: satz
+                    };
+                    
+                    vocabularyPool.push(vocItem);
+
+                    let row = document.createElement('div');
+                    row.className = 'scanned-item';
+                    row.innerHTML = `<span><strong>${vocItem.fullEn}</strong> ➔ ${vocItem.de}</span>`;
+                    container.appendChild(row);
+                }
+            }
+        } catch (e) {
+            console.error("Fehler beim Verarbeiten einer Zeile: ", e);
         }
     });
     
     document.getElementById('scanned-title').innerText = `Erkannte Vokabeln (${vocabularyPool.length}):`;
 }
 
-// Hilfsfunktion trennt deutsche Bedeutung und den Beispielsatz intelligent voneinander
+// Hilfsfunktion trennt deutsche Bedeutung und den Beispielsatz voneinander
 function splitGermanAndSentence(rest, enWort) {
     let cleanRest = rest.toLowerCase();
     let sentenceStart = -1;
@@ -145,12 +149,12 @@ function splitGermanAndSentence(rest, enWort) {
         }
     }
     
-    // Fallback: Suche nach dem ersten Großbuchstaben im hinteren Textabschnitt
+    // Fallback: Suche nach dem ersten Großbuchstaben
     if (sentenceStart === -1) {
         let matches = [...rest.matchAll(/[A-Z][a-z]+/g)];
         if (matches.length > 0) {
             for (let m of matches) {
-                let word = m[0].toLowerCase();
+                let word = m.toLowerCase();
                 if (starters.includes(word + " ") || m.index > rest.length / 3) {
                     sentenceStart = m.index;
                     break;
@@ -169,7 +173,7 @@ function splitGermanAndSentence(rest, enWort) {
         };
     }
     
-    // Letzter Ausweg bei Erkennungsproblemen: Halbiere den Text in der Mitte
+    // Letzter Ausweg: Halbiere den Text in der Mitte
     return {
         de: rest.substring(0, rest.length / 2).trim(),
         sentence: rest.substring(rest.length / 2).trim()
@@ -243,16 +247,15 @@ function checkAnswer() {
         
         document.getElementById('action-btn').innerText = "Weiter";
         isShowingResolution = true;
-    } else {
-        currentIndex++;
-        if (currentIndex < activeList.length) {
-            showQuestion();
-        } else {
-            handleStageTransition();
-        }
-    }
+} else {
+currentIndex++;
+if (currentIndex < activeList.length) {
+showQuestion();
+} else {
+handleStageTransition();
 }
-
+}
+}
 // Phasenwechsel steuern
 function handleStageTransition() {
 if (currentStage === 1) {
