@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KI Vokabel-Scanner & Trainer Pro</title>
+    <!-- Tesseract.js für die Bilderkennung direkt über CDN laden -->
+    <script src="https://jsdelivr.net"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f4f8;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            max-width: 650px;
+            width: 100%;
+            text-align: center;
+        }
+        h1 { color: #2c3e50; font-size: 26px; margin-top: 0; }
+        .upload-zone {
+            border: 3px dashed #3498db;
+            padding: 30px 20px;
+            border-radius: 12px;
+            background: #f9fbfd;
+            cursor: pointer;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+        .upload-zone:hover { background: #ecf5fc; border-color: #2980b9; }
+        #preview-img { max-width: 100%; max-height: 200px; margin-top: 15px; border-radius: 8px; display: none; }
+        
+        .status { font-weight: bold; color: #e67e22; margin: 15px 0; font-size: 15px; }
+        
+        .scanned-list { text-align: left; max-height: 250px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; display: none; }
+        .scanned-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #edf2f7; font-size: 14px; }
+        
+        .phase-badge { background: #34495e; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
+        .word-display { font-size: 32px; font-weight: bold; color: #2c3e50; margin: 25px 0 15px; }
+        .sentence-box { background: #eef2f7; padding: 18px; border-radius: 8px; font-style: italic; color: #4a5568; margin: 20px 0; line-height: 1.5; font-size: 16px; border-left: 5px solid #3498db; text-align: left; }
+        
+        input[type="text"] {
+            width: 85%;
+            padding: 14px;
+            border: 2px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 18px;
+            outline: none;
+            transition: border-color 0.2s;
+            text-align: center;
+        }
+        input[type="text"]:focus { border-color: #3498db; }
+        
+        button {
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 90%;
+            font-weight: bold;
+            margin-top: 15px;
+            box-shadow: 0 4px 6px rgba(46, 204, 113, 0.2);
+            transition: all 0.2s;
+        }
+        button:hover { background-color: #27ae60; transform: translateY(-1px); }
+        button.nav-btn { background-color: #3498db; }
+        button.nav-btn:hover { background-color: #2980b9; }
+        
+        .feedback { font-size: 20px; font-weight: bold; margin-top: 20px; }
+        .correct { color: #2ecc71; }
+        .wrong { color: #e74c3c; }
+        
+        .stats-info { margin-top: 25px; font-size: 13px; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- SCANNER SCREEN -->
+    <div id="scan-screen">
+        <h1>📸 Screenshot Vokabel-Scanner</h1>
+        <p style="color: #7f8c8d; margin-bottom: 25px;">Wähle das Bild deiner Vokabeln aus. Die Texterkennung läuft direkt im Browser.</p>
+        
+        <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+            <p><strong>Klicke hier, um einen Screenshot hochzuladen</strong></p>
+            <p style="font-size: 12px; color: #95a5a6;">(Unterstützt PNG & JPG)</p>
+            <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleImageUpload(event)">
+            <img id="preview-img" alt="Vorschau">
+        </div>
+
+        <div id="status-text" class="status" style="display:none;">Bereite Scanner vor...</div>
+
+        <div class="scanned-list" id="scanned-box">
+            <h4 style="margin-top:0; color:#2c3e50;">Erkannte Vokabeln:</h4>
+            <div id="scanned-container"></div>
+        </div>
+
+        <button id="start-btn" class="nav-btn" style="display:none;" onclick="initTrainer()">Abfrage starten 🚀</button>
+    </div>
+
+    <!-- TRAINER SCREEN -->
+    <div id="trainer-screen" style="display:none;">
+        <span class="phase-badge" id="phase-title">Runde 1: Deutsch ➔ Englisch</span>
+        <div class="word-display" id="question-display">-</div>
+        <div class="sentence-box" id="sentence-box" style="display:none;"></div>
+        
+        <input type="text" id="user-input" placeholder="Englische Übersetzung..." autocomplete="off" onkeypress="handleKeyPress(event)">
+        <button id="action-btn" onclick="checkAnswer()">Antwort prüfen</button>
+        
+        <div class="feedback" id="feedback-display"></div>
+        <div class="stats-info" id="stats-display">-</div>
+    </div>
+</div>
+
+<!-- Logik-Skript einbinden -->
+<script src="app.js"></script>
+</body>
+</html>
