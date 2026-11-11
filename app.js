@@ -7,9 +7,10 @@ let isShowingResolution = false;
 
 // 1. Bild verarbeiten und OCR starten
 async function handleImageUpload(event) {
-    const file = event.target.files[0];
+    const file = event.target.files[0]; // Fix für die Dateiauswahl
     if (!file) return;
 
+    // Vorschau des Bildes anzeigen
     const reader = new FileReader();
     reader.onload = function(e) {
         const img = document.getElementById('preview-img');
@@ -20,9 +21,11 @@ async function handleImageUpload(event) {
 
     const statusText = document.getElementById('status-text');
     statusText.style.display = 'block';
+    statusText.style.color = '#e67e22';
     statusText.innerText = "⏳ Analysiere Bildstruktur (kann kurz dauern)...";
 
     try {
+        // Tesseract-Erkennung starten
         const result = await Tesseract.recognize(file, 'deu+eng', {
             logger: m => {
                 if(m.status === 'recognizing text') {
@@ -31,12 +34,28 @@ async function handleImageUpload(event) {
             }
         });
 
+        statusText.style.color = '#2ecc71';
         statusText.innerText = "✅ Scan erfolgreich!";
         processOcrText(result.data.text);
 
     } catch (error) {
-        console.error(error);
-        statusText.innerText = "❌ Fehler beim Lesen des Bildes.";
+        console.error("OCR-Fehler-Details:", error);
+        
+        statusText.style.color = '#e74c3c';
+        // Prüfen, ob es ein lokaler CORS/Protokoll-Fehler ist
+        if (window.location.protocol === 'file:') {
+            statusText.innerHTML = `
+                ❌ <strong>Lokaler Browser-Sicherheitsfehler (CORS)</strong><br>
+                Tesseract darf lokal keine Sprachdaten laden.<br>
+                <span style="color:#333;font-size:13px;">💡 <strong>Lösung:</strong> Lade die Dateien auf GitHub Pages hoch, dort funktioniert es sofort über HTTPS! Alterativ kannst du einen lokalen Server nutzen.</span>
+            `;
+        } else {
+            statusText.innerHTML = `
+                ❌ <strong>Fehler beim Lesen des Bildes!</strong><br>
+                <span style="color:#333;font-size:13px;">Details: ${error.message || error}</span><br>
+                <span style="color:#333;font-size:13px;">💡 Bitte stelle sicher, dass du ein gültiges Bild (PNG/JPG) hochlädst.</span>
+            `;
+        }
     }
 }
 
@@ -49,17 +68,21 @@ function processOcrText(text) {
     container.innerHTML = '';
 
     lines.forEach((line) => {
+        // Bereinige unbedeutende Zeichen
         let cleanLine = line.replace(/\[.*?\]/g, ''); 
+        
+        // Trenne Zeilen bei großen Lücken (Tabellenstruktur)
         let parts = cleanLine.split(/\s{2,}|\t|;|—/); 
         
         if (parts.length >= 2) {
             let enWort = parts[0].trim();
             let deWort = parts[1].trim();
-            let satz = parts.slice(2).join(" ").trim() || `Context sentence for ${enWort}`;
+            // Nimm den Rest als Beispielsatz
+            let satz = parts.slice(2).join(" ").trim() || `Satzkontext: ${enWort} entspricht ${deWort}`;
 
             let vocItem = {
                 de: deWort,
-                en: enWort.replace(/^to\s+/i, ''), 
+                en: enWort.replace(/^to\s+/i, ''), // Entfernt "to" für die Abfragekontrolle
                 fullEn: enWort,
                 sentence: satz
             };
@@ -77,7 +100,9 @@ function processOcrText(text) {
         document.getElementById('scanned-box').style.display = 'block';
         document.getElementById('start-btn').style.display = 'inline-block';
     } else {
-        document.getElementById('status-text').innerText = "⚠ Keine klare Struktur erkannt. Versuche einen schärferen Screenshot.";
+        const statusText = document.getElementById('status-text');
+        statusText.style.color = '#e67e22';
+        statusText.innerText = "⚠ Text wurde gelesen, aber es konnte keine Vokabel-Struktur extrahiert werden. Versuche einen engeren Bildausschnitt.";
     }
 }
 
