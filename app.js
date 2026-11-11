@@ -32,34 +32,28 @@ async function handleBatchUpload(event) {
         reader.readAsDataURL(files[i]);
     }
 
-    // Erzeuge den Tesseract Worker mit den GitHub-Sicherheits-Fixes
-    statusText.innerText = "⏳ Starte KI-Engine...";
-    let worker;
-    try {
-        worker = await Tesseract.createWorker('deu+eng', 1, {
-            workerBlobURL: false // WICHTIG: Das deaktiviert Blob-URLs und behebt den GitHub-Pages-Fehler!
-        });
-    } catch (e) {
-        console.error("Worker-Initialisierungsfehler:", e);
-        statusText.style.color = '#e74c3c';
-        statusText.innerText = "❌ Fehler beim Laden der KI-Engine. Bitte lade die Seite neu.";
-        return;
-    }
+    statusText.innerText = "⏳ Initialisiere KI-Engine...";
 
-    // Gehe alle hochgeladenen Bilder nacheinander durch
+    // Gehe alle hochgeladenen Bilder nacheinander durch (Direktaufruf ohne Worker-Erzeugung!)
     for (let i = 0; i < files.length; i++) {
         statusText.innerText = `⏳ Scanne Bild ${i + 1} von ${files.length}...`;
         
         try {
-            const { data: { text } } = await worker.recognize(files[i]);
+            // Direktaufruf verhindert CSP/Blob-Sicherheitsfehler auf GitHub vollständig
+            const { data: { text } } = await Tesseract.recognize(files[i], 'deu+eng', {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        statusText.innerText = `⏳ Bild ${i + 1}/${files.length}: ${Math.round(m.progress * 100)}%`;
+                    }
+                }
+            });
             processOcrTextChunk(text);
         } catch (error) {
             console.error(`Fehler bei Bild ${i + 1}:`, error);
+            statusText.style.color = '#e74c3c';
+            statusText.innerText = `❌ Fehler bei Bild ${i + 1}. Details im Log. Scanne weiter...`;
         }
     }
-
-    // Schließe den Worker, um Speicher freizugeben
-    await worker.terminate();
 
     // Abschluss-Check
     if (vocabularyPool.length > 0) {
@@ -69,7 +63,7 @@ async function handleBatchUpload(event) {
         document.getElementById('start-btn').style.display = 'inline-block';
     } else {
         statusText.style.color = '#e74c3c';
-        statusText.innerText = "❌ Es wurden Texte gelesen, aber keine klare Vokabelstruktur gefunden. Stelle sicher, dass die Tabellenspalten gut sichtbar sind.";
+        statusText.innerText = "❌ Es wurden keine Vokabelstrukturen erkannt. Bitte stelle sicher, dass die Tabelle gut lesbar ist.";
     }
 }
 
