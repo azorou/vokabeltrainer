@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KI Vokabel-Scanner & Trainer Pro</title>
     <!-- Tesseract.js für die Bilderkennung direkt über CDN laden -->
-    <script src="https://jsdelivr.net"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -43,7 +43,7 @@
         
         .status { font-weight: bold; color: #e67e22; margin: 15px 0; font-size: 15px; line-height: 1.4; }
         
-        .scanned-list { text-align: left; max-height: 250px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; display: none; }
+        .scanned-list { text-align: left; max-height: 250px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; }
         .scanned-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #edf2f7; font-size: 14px; }
         
         .phase-badge { background: #34495e; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
@@ -85,6 +85,20 @@
         .wrong { color: #e74c3c; }
         
         .stats-info { margin-top: 25px; font-size: 13px; color: #7f8c8d; }
+        [hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 3px solid #f39c12; outline-offset: 2px; }
+.upload-zone { display: block; }
+.hint { display: block; font-size: 12px; color: #6b7c8a; margin-top: 6px; }
+.scanned-list h2 { margin: 0 0 6px; font-size: 16px; color: #2c3e50; }
+.edit-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #edf2f7; }
+.edit-row input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 14px; text-align: left; }
+.edit-row .full { grid-column: 1 / -1; font-style: italic; }
+.edit-row .del, .edit-row .del:hover { width: auto; margin: 0; padding: 6px 12px; background: #c0392b; box-shadow: none; transform: none; }
+button.secondary { background-color: #7f8c8d; box-shadow: none; }
+button.secondary:hover { background-color: #6c7a7b; }
+.feedback.correct { color: #1e8449; }
+.feedback.wrong { color: #c0392b; }
     </style>
 </head>
 <body>
@@ -93,37 +107,47 @@
     <!-- SCANNER SCREEN -->
     <div id="scan-screen">
         <h1>📸 Screenshot Vokabel-Scanner</h1>
-        <p style="color: #7f8c8d; margin-bottom: 25px;">Wähle einen oder <strong>mehrere Screenshots gleichzeitig</strong> aus. Die Erkennung ist jetzt voll GitHub-optimiert.</p>
-        
-        <!-- multiple Attribut hinzugefügt -->
-        <div class="upload-zone" onclick="document.getElementById('file-input').click()">
-            <p><strong>Klicke hier, um Bilder auszuwählen</strong></p>
-            <p style="font-size: 12px; color: #95a5a6;">(Halte STRG / CMD gedrückt für die Mehrfachauswahl)</p>
-            <input type="file" id="file-input" accept="image/*" multiple style="display:none" onchange="handleBatchUpload(event)">
-            <div class="preview-container" id="preview-box"></div>
-        </div>
+        <p style="color:#6b7c8a; margin-bottom:25px;">Wähle einen oder <strong>mehrere Screenshots</strong> deiner Vokabelseiten aus (3 Spalten: Englisch | Deutsch | Beispielsatz).</p>
 
-        <div id="status-text" class="status" style="display:none;">Bereite Multi-Scanner vor...</div>
+        <label class="upload-zone" for="file-input" id="upload-zone" tabindex="0">
+            <strong>Klicke hier, um Bilder auszuwählen</strong>
+            <span class="hint">Mehrfachauswahl mit STRG / CMD oder Bilder hierher ziehen</span>
+            <span class="preview-container" id="preview-box"></span>
+        </label>
+        <input type="file" id="file-input" class="sr-only" accept="image/*" multiple>
 
-        <div class="scanned-list" id="scanned-box">
-            <h4 style="margin-top:0; color:#2c3e50;" id="scanned-title">Erkannte Vokabeln (0):</h4>
+        <div id="status-text" class="status" role="status" aria-live="polite" hidden></div>
+
+        <div class="scanned-list" id="scanned-box" hidden>
+            <h2 id="scanned-title">Erkannte Vokabeln (0)</h2>
+            <span class="hint" style="margin-bottom:12px;">Die Texterkennung ist nicht perfekt: Felder kannst du direkt korrigieren, ✕ löscht einen Eintrag.</span>
             <div id="scanned-container"></div>
         </div>
 
-        <button id="start-btn" class="nav-btn" style="display:none;" onclick="initTrainer()">Gesamte Liste abfragen 🚀</button>
+        <button type="button" id="start-btn" class="nav-btn" hidden>Gesamte Liste abfragen 🚀</button>
+        <button type="button" id="load-btn" class="nav-btn secondary" hidden>💾 Gespeicherte Liste laden</button>
     </div>
 
     <!-- TRAINER SCREEN -->
-    <div id="trainer-screen" style="display:none;">
+    <div id="trainer-screen" hidden>
         <span class="phase-badge" id="phase-title">Runde 1: Deutsch ➔ Englisch</span>
         <div class="word-display" id="question-display">-</div>
-        <div class="sentence-box" id="sentence-box" style="display:none;"></div>
-        
-        <input type="text" id="user-input" placeholder="Englische Übersetzung..." autocomplete="off" onkeypress="handleKeyPress(event)">
-        <button id="action-btn" onclick="checkAnswer()">Antwort prüfen</button>
-        
-        <div class="feedback" id="feedback-display"></div>
-        <div class="stats-info" id="stats-display">-</div>
+        <div class="sentence-box" id="sentence-box" hidden></div>
+
+        <label for="user-input" class="sr-only">Deine Antwort</label>
+        <input type="text" id="user-input" placeholder="Englische Übersetzung..." autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="button" id="action-btn">Antwort prüfen</button>
+
+        <div class="feedback" id="feedback-display" role="status" aria-live="polite"></div>
+        <div class="stats-info" id="stats-display"></div>
+    </div>
+
+    <!-- END SCREEN -->
+    <div id="end-screen" hidden>
+        <h1>🎓 Geschafft!</h1>
+        <p id="end-text"></p>
+        <button type="button" id="restart-btn" class="nav-btn">Nochmal üben</button>
+        <button type="button" id="back-btn" class="nav-btn secondary">Zurück zur Liste</button>
     </div>
 </div>
 
