@@ -34,12 +34,11 @@ async function handleBatchUpload(event) {
 
     statusText.innerText = "⏳ Initialisiere KI-Engine...";
 
-    // Gehe alle hochgeladenen Bilder nacheinander durch (Direktaufruf ohne Worker-Erzeugung!)
+    // Gehe alle hochgeladenen Bilder nacheinander durch
     for (let i = 0; i < files.length; i++) {
         statusText.innerText = `⏳ Scanne Bild ${i + 1} von ${files.length}...`;
         
         try {
-            // Direktaufruf verhindert CSP/Blob-Sicherheitsfehler auf GitHub vollständig
             const { data: { text } } = await Tesseract.recognize(files[i], 'deu+eng', {
                 logger: m => {
                     if (m.status === 'recognizing text') {
@@ -51,7 +50,7 @@ async function handleBatchUpload(event) {
         } catch (error) {
             console.error(`Fehler bei Bild ${i + 1}:`, error);
             statusText.style.color = '#e74c3c';
-            statusText.innerText = `❌ Fehler bei Bild ${i + 1}. Details im Log. Scanne weiter...`;
+            statusText.innerText = `❌ Fehler bei Bild ${i + 1}. Scanne weiter...`;
         }
     }
 
@@ -73,19 +72,42 @@ function processOcrTextChunk(text) {
     const container = document.getElementById('scanned-container');
 
     lines.forEach((line) => {
-        let cleanLine = line.replace(/\[.*?\]/g, ''); // Entferne Lautschrift
-        let parts = cleanLine.split(/\s{2,}|\t|;|—/); // Trenne Spalten bei großen Lücken
+        let enWort = "";
+        let deWort = "";
+        let satz = "";
         
-        if (parts.length >= 2) {
-            let enWort = parts[0].trim();
-            let deWort = parts[1].trim();
-            let satz = parts.slice(2).join(" ").trim() || `Context: ${enWort} means ${deWort}`;
-
-            // Validiere, dass kein doppelter Eintrag entsteht
-            if (enWort.length > 1 && !vocabularyPool.some(v => v.en.toLowerCase() === enWort.toLowerCase())) {
+        // 1. Hauptstrategie: Suche nach den Lautschrift-Klammern [ ] oder / / als Spaltentrenner
+        let bracketMatch = line.match(/^(.*?)\s*[\[\/](.*?)[\]\/]\s*(.*)$/);
+        
+        if (bracketMatch) {
+            enWort = bracketMatch[1].trim();
+            let rest = bracketMatch[3].trim();
+            
+            // Bereinige Zahlen am Zeilenanfang (z.B. "1 oral" -> "oral")
+            enWort = enWort.replace(/^\d+\s+/, '');
+            
+            // Trenne das Deutsche vom englischen Beispielsatz
+            let splitResult = splitGermanAndSentence(rest, enWort);
+            deWort = splitResult.de;
+            satz = splitResult.sentence;
+        } else {
+            // 2. Fallback: Falls keine Klammern da sind, trenne klassisch nach großen Lücken
+            let parts = line.split(/\s{2,}|\t|;|—/);
+            if (parts.length >= 2) {
+                enWort = parts[0].trim().replace(/^\d+\s+/, '');
+                deWort = parts[1].trim();
+                satz = parts.slice(2).join(" ").trim() || `Context: ${enWort}`;
+            }
+        }
+        
+        // Validierung: Wenn englisches und deutsches Fragment erfolgreich isoliert wurden
+        if (enWort.length > 1 && deWort.length > 1) {
+            let cleanEn = enWort.replace(/^to\s+/i, '').trim(); // Für die Überprüfung beim Abfragen
+            
+            if (!vocabularyPool.some(v => v.en.toLowerCase() === cleanEn.toLowerCase())) {
                 let vocItem = {
                     de: deWort,
-                    en: enWort.replace(/^to\s+/i, ''), // Entferne "to" für die Eingabeüberprüfung
+                    en: cleanEn,
                     fullEn: enWort,
                     sentence: satz
                 };
@@ -101,6 +123,57 @@ function processOcrTextChunk(text) {
     });
     
     document.getElementById('scanned-title').innerText = `Erkannte Vokabeln (${vocabularyPool.length}):`;
+}
+
+// Hilfsfunktion trennt deutsche Bedeutung und den Beispielsatz intelligent voneinander
+function splitGermanAndSentence(rest, enWort) {
+    let cleanRest = rest.toLowerCase();
+    let sentenceStart = -1;
+    
+    // Typische englische Signalwörter, die den Satzanfang im Buch markieren
+    const starters = [
+        "the ", "an ", "a ", "what ", "they ", "she ", "he ", "it ", "there ", 
+        "this ", "in ", "let's ", "my ", "how ", "people ", "after ", "dogs ", 
+        "claire ", "some ", "we ", "you ", "i ", "our ", "their ", "gales ", "put "
+    ];
+    
+    for (let starter of starters) {
+        let sIdx = cleanRest.indexOf(starter);
+        if (sIdx !== -1) {
+            sentenceStart = sIdx;
+            break;
+        }
+    }
+    
+    // Fallback: Suche nach dem ersten Großbuchstaben im hinteren Textabschnitt
+    if (sentenceStart === -1) {
+        let matches = [...rest.matchAll(/[A-Z][a-z]+/g)];
+        if (matches.length > 0) {
+            for (let m of matches) {
+                let word = m[0].toLowerCase();
+                if (starters.includes(word + " ") || m.index > rest.length / 3) {
+                    sentenceStart = m.index;
+                    break;
+                }
+            }
+            if (sentenceStart === -1) {
+                sentenceStart = matches[matches.length - 1].index;
+            }
+        }
+    }
+    
+    if (sentenceStart !== -1 && sentenceStart < rest.length - 5) {
+        return {
+            de: rest.substring(0, sentenceStart).trim().replace(/[;,\- ]+$/, ''),
+            sentence: rest.substring(sentenceStart).trim()
+        };
+    }
+    
+    // Letzter Ausweg bei Erkennungsproblemen: Halbiere den Text in der Mitte
+    return {
+        de: rest.substring(0, rest.length / 2).trim(),
+        sentence: rest.substring(rest.length / 2).trim()
+    };
 }
 
 // Trainer starten
@@ -182,43 +255,41 @@ function checkAnswer() {
 
 // Phasenwechsel steuern
 function handleStageTransition() {
-    if (currentStage === 1) {
-        if (wrongAnswers.length > 0) {
-            alert("Runde 1 beendet! Wir wiederholen jetzt direkt deine Fehler.");
-            activeList = [...wrongAnswers];
-            wrongAnswers = [];
-            currentIndex = 0;
-            currentStage = 2;
-            showQuestion();
-        } else {
-            startRound2();
-        }
-    } else if (currentStage === 2) {
-        if (wrongAnswers.length > 0) {
-            alert("Ein paar Wackelkandidaten gibt es noch. Noch einmal!");
-            activeList = [...wrongAnswers];
-            wrongAnswers = [];
-            currentIndex = 0;
-            showQuestion();
-        } else {
-            startRound2();
-        }
-    } else if (currentStage === 3) {
-        alert("Perfekt gelernt! Du bist bereit für deinen KI-Test! 🎓");
-        location.reload();
-    }
+if (currentStage === 1) {
+if (wrongAnswers.length > 0) {
+alert("Runde 1 beendet! Wir wiederholen jetzt direkt deine Fehler.");
+activeList = [...wrongAnswers];
+wrongAnswers = [];
+currentIndex = 0;
+currentStage = 2;
+showQuestion();
+} else {
+startRound2();
 }
-
+} else if (currentStage === 2) {
+if (wrongAnswers.length > 0) {
+alert("Ein paar Wackelkandidaten gibt es noch. Noch einmal!");
+activeList = [...wrongAnswers];
+wrongAnswers = [];
+currentIndex = 0;
+showQuestion();
+} else {
+startRound2();
+}
+} else if (currentStage === 3) {
+alert("Perfekt gelernt! Du bist bereit für deinen KI-Test! 🎓");
+location.reload();
+}
+}
 function startRound2() {
-    alert("Super! Jetzt startet Runde 2: Du siehst den Satz und musst das englische Wort eintragen!");
-    activeList = [...vocabularyPool];
-    currentIndex = 0;
-    currentStage = 3;
-    showQuestion();
+alert("Super! Jetzt startet Runde 2: Du siehst den Satz und musst das englische Wort eintragen!");
+activeList = [...vocabularyPool];
+currentIndex = 0;
+currentStage = 3;
+showQuestion();
 }
-
 function handleKeyPress(event) {
-    if (event.key === 'Enter') {
-        checkAnswer();
-    }
+if (event.key === 'Enter') {
+checkAnswer();
+}
 }
