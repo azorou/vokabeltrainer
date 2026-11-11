@@ -4,7 +4,7 @@
 const STORAGE_KEY = 'vokabeltrainer.pool.v1';
 const $ = (id) => document.getElementById(id);
 
-let vocabularyPool = [];   // {en, de, sentence}
+let vocabularyPool = [];   // {en, de, sentence, fix?}
 let activeList = [];
 let wrongAnswers = [];
 let currentIndex = 0;
@@ -237,7 +237,7 @@ function extractSentence(lines) {
 }
 
 function parseTable(rawWords) {
-        const words = rawWords
+    const words = rawWords
         .map((w) => ({ t: (w.text || '').trim(), c: w.confidence, x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0, y1: w.bbox.y1 }))
         .filter((w) => w.t && !/^[!|•·]+$/.test(w.t));
     if (words.length < 6) return [];
@@ -277,7 +277,12 @@ function parseTable(rawWords) {
 
     const entries = [];
     anchors.forEach((a, i) => {
-                   const inRow = (arr) => arr.filter((w) => w.yc >= row.top && w.yc < row.end);
+        const row = { a, top: a.yc - tol, end: anchors[i + 1] ? anchors[i + 1].yc - tol : Infinity };
+        const en = parseHeadword(collect(l1, row).join(' '));
+        const de = joinHyphenated(collect(l2, row)).replace(/[|!•]/g, '').trim();
+        const sentence = extractSentence(collect(l3, row)).replace(/\|/g, 'I');
+        if (/^[A-Za-z]/.test(en) && en.split(' ').length <= 6 && de.length > 1 && sentence.length > 5) {
+            const inRow = (arr) => arr.filter((w) => w.yc >= row.top && w.yc < row.end);
             const enConf = Math.min(100, ...inRow(cols[0]).map((w) => w.c ?? 100));
             const sentConf = {};
             inRow(cols[2]).forEach((w) => {
@@ -291,15 +296,31 @@ function parseTable(rawWords) {
 }
 
 /* ================= Kontext-Korrektur ================= */
+// Typische OCR-Verwechslungen: [steht im Text, richtig wäre]
+const CONFUSIONS = [['m', 'rn'], ['rn', 'm'], ['w', 'vv'], ['vv', 'w'], ['d', 'cl'], ['cl', 'd']];
+
+/** Alle Varianten eines Wortes mit genau einer Verwechslungs-Ersetzung */
+function variants(word) {
+    const out = new Set();
+    for (const [a, b] of CONFUSIONS) {
+        let i = word.indexOf(a);
+        while (i !== -1) {
+            out.add(word.slice(0, i) + b + word.slice(i + a.length));
+            i = word.indexOf(a, i + 1);
+        }
+    }
+    return [...out];
+}
+
 function refineEntry(e, enConf = 50, sentConf = {}) {
     const notes = [];
     const labels = { en: 'Englisch', de: 'Deutsch', sentence: 'Satz' };
 
-    // 1) typische OCR-Zeichenverwechslungen mitten im Wort
+    // 1) Zeichenverwechslungen mitten im Wort (0→o, 1/|→l, großes I→l)
     const fixChars = (s) => s
-        .replace(/(?<=\p{L})0(?=\p{L})/gu, 'o')
-        .replace(/(?<=\p{L})[1|](?=\p{L})/gu, 'l')
-        .replace(/(?<=\p{Ll})I(?=\p{Ll})/gu, 'l');
+        .replace(/(\p{L})0(?=\p{L})/gu, '$1o')
+        .replace(/(\p{L})[1|](?=\p{L})/gu, '$1l')
+        .replace(/(\p{Ll})I(?=\p{Ll})/gu, '$1l');
     for (const key of ['en', 'de', 'sentence']) {
         const fixed = fixChars(e[key]);
         if (fixed !== e[key]) { notes.push(`${labels[key]}: „${e[key]}“ → „${fixed}“`); e[key] = fixed; }
@@ -307,32 +328,63 @@ function refineEntry(e, enConf = 50, sentConf = {}) {
 
     // 2) Stichwort muss (auch gebeugt) im Beispielsatz vorkommen
     const base = norm(e.en).split(' ')[0];
-    if (base.length >= 4) {
-        const stem = /[ey]$/.test(base) ? base.slice(0, -1) : base;
+    if (base.length >= 3) {
+        const stemOf = (w) => (w.length >= 4 && /[ey]$/.test(w) ? w.slice(0, -1) : w);
         const tokens = e.sentence.match(/\p{L}+/gu) || [];
-        if (!tokens.some((t) => t.toLowerCase().startsWith(stem))) {
-            const maxD = base.length >= 8 ? 2 : 1;
-            let best = null;
+        const has = (stem) => tokens.some((t) => t.toLowerCase().startsWith(stem));
+        const stem = stemOf(base);
+
+        if (!has(stem)) {
+            let done = false;
+
+            // 2a) rn↔m, vv↔w, cl↔d: passt eine Variante zum Satz bzw. zum Stichwort?
+            const kv = variants(base).find((v) => has(stemOf(v)));
+            let tv = null;
             for (const orig of tokens) {
-                const t = orig.toLowerCase();
-                for (const L of [base.length - 1, base.length, base.length + 1]) {
-                    if (L > t.length) continue;
-                    const d = levenshtein(t.slice(0, L), base);
-                    if (d >= 1 && d <= maxD && (!best || d < best.d)) best = { d, L, orig, t };
+                const v = variants(orig.toLowerCase()).find((x) => x.startsWith(stem));
+                if (v) { tv = { orig, v }; break; }
+            }
+            if (kv || tv) {
+                const tokConf = tv ? (sentConf[tv.orig.toLowerCase()] ?? 100) : 100;
+                if (kv && (!tv || enConf <= tokConf)) {
+                    const before = e.en;
+                    e.en = e.en.replace(new RegExp(`\\b${escapeRe(base)}\\b`, 'i'), kv);
+                    if (e.en !== before) { notes.push(`Englisch: „${before}“ → „${e.en}“ (laut Beispielsatz)`); done = true; }
+                }
+                if (!done && tv) {
+                    const cap = tv.orig[0] !== tv.orig[0].toLowerCase();
+                    const fixedWord = cap ? tv.v[0].toUpperCase() + tv.v.slice(1) : tv.v;
+                    e.sentence = e.sentence.replace(new RegExp(`\\b${escapeRe(tv.orig)}\\b`), fixedWord);
+                    notes.push(`Satz: „${tv.orig}“ → „${fixedWord}“ (laut Stichwort)`);
+                    done = true;
                 }
             }
-            if (best) {
-                const tokConf = sentConf[best.t] ?? 100;
-                if (Math.min(enConf, tokConf) < 85) {          // nur bei unsicherer Erkennung
-                    const cand = best.t.slice(0, best.L);
-                    if (enConf <= tokConf) {                   // Stichwort ist das schwächere Glied
-                        const before = e.en;
-                        e.en = e.en.replace(new RegExp(`\\b${escapeRe(base)}\\b`, 'i'), cand);
-                        if (e.en !== before) notes.push(`Englisch: „${before}“ → „${e.en}“ (laut Beispielsatz)`);
-                    } else {                                   // Satzwort ist das schwächere Glied
-                        const fixedWord = base + best.orig.slice(best.L);
-                        e.sentence = e.sentence.replace(new RegExp(`\\b${escapeRe(best.orig)}\\b`), fixedWord);
-                        notes.push(`Satz: „${best.orig}“ → „${fixedWord}“ (laut Stichwort)`);
+
+            // 2b) sonst: kleine Abweichung (Levenshtein) + niedrige Erkennungssicherheit
+            if (!done && base.length >= 4) {
+                const maxD = base.length >= 8 ? 2 : 1;
+                let best = null;
+                for (const orig of tokens) {
+                    const t = orig.toLowerCase();
+                    for (const L of [base.length - 1, base.length, base.length + 1]) {
+                        if (L > t.length) continue;
+                        const d = levenshtein(t.slice(0, L), base);
+                        if (d >= 1 && d <= maxD && (!best || d < best.d)) best = { d, L, orig, t };
+                    }
+                }
+                if (best) {
+                    const tokConf = sentConf[best.t] ?? 100;
+                    if (Math.min(enConf, tokConf) < 85) {
+                        const cand = best.t.slice(0, best.L);
+                        if (enConf <= tokConf) {
+                            const before = e.en;
+                            e.en = e.en.replace(new RegExp(`\\b${escapeRe(base)}\\b`, 'i'), cand);
+                            if (e.en !== before) notes.push(`Englisch: „${before}“ → „${e.en}“ (laut Beispielsatz)`);
+                        } else {
+                            const fixedWord = base + best.orig.slice(best.L);
+                            e.sentence = e.sentence.replace(new RegExp(`\\b${escapeRe(best.orig)}\\b`), fixedWord);
+                            notes.push(`Satz: „${best.orig}“ → „${fixedWord}“ (laut Stichwort)`);
+                        }
                     }
                 }
             }
@@ -370,7 +422,7 @@ function renderList() {
             savePool();
             renderList();
         });
-                row.append(
+        row.append(
             makeInput(item, 'en', 'Englisch'),
             makeInput(item, 'de', 'Deutsch'),
             del,
@@ -518,6 +570,8 @@ function finish() {
 function init() {
     const fileInput = $('file-input');
     const zone = $('upload-zone');
+
+    window.addEventListener('error', (ev) => setStatus(`❌ Skriptfehler: ${ev.message}`, 'error'));
 
     fileInput.addEventListener('change', () => {
         const files = [...fileInput.files];
