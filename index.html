@@ -38,9 +38,10 @@
             transition: all 0.3s;
         }
         .upload-zone:hover { background: #ecf5fc; border-color: #2980b9; }
-        #preview-img { max-width: 100%; max-height: 200px; margin-top: 15px; border-radius: 8px; display: none; }
+        .preview-container { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 15px; }
+        .preview-img { max-width: 80px; max-height: 80px; border-radius: 4px; border: 1px solid #cbd5e1; }
         
-        .status { font-weight: bold; color: #e67e22; margin: 15px 0; font-size: 15px; }
+        .status { font-weight: bold; color: #e67e22; margin: 15px 0; font-size: 15px; line-height: 1.4; }
         
         .scanned-list { text-align: left; max-height: 250px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; display: none; }
         .scanned-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #edf2f7; font-size: 14px; }
@@ -92,23 +93,24 @@
     <!-- SCANNER SCREEN -->
     <div id="scan-screen">
         <h1>📸 Screenshot Vokabel-Scanner</h1>
-        <p style="color: #7f8c8d; margin-bottom: 25px;">Wähle das Bild deiner Vokabeln aus. Die Texterkennung läuft direkt im Browser.</p>
+        <p style="color: #7f8c8d; margin-bottom: 25px;">Wähle einen oder <strong>mehrere Screenshots gleichzeitig</strong> aus. Die Erkennung ist jetzt voll GitHub-optimiert.</p>
         
+        <!-- multiple Attribut hinzugefügt -->
         <div class="upload-zone" onclick="document.getElementById('file-input').click()">
-            <p><strong>Klicke hier, um einen Screenshot hochzuladen</strong></p>
-            <p style="font-size: 12px; color: #95a5a6;">(Unterstützt PNG & JPG)</p>
-            <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleImageUpload(event)">
-            <img id="preview-img" alt="Vorschau">
+            <p><strong>Klicke hier, um Bilder auszuwählen</strong></p>
+            <p style="font-size: 12px; color: #95a5a6;">(Halte STRG / CMD gedrückt für die Mehrfachauswahl)</p>
+            <input type="file" id="file-input" accept="image/*" multiple style="display:none" onchange="handleBatchUpload(event)">
+            <div class="preview-container" id="preview-box"></div>
         </div>
 
-        <div id="status-text" class="status" style="display:none;">Bereite Scanner vor...</div>
+        <div id="status-text" class="status" style="display:none;">Bereite Multi-Scanner vor...</div>
 
         <div class="scanned-list" id="scanned-box">
-            <h4 style="margin-top:0; color:#2c3e50;">Erkannte Vokabeln:</h4>
+            <h4 style="margin-top:0; color:#2c3e50;" id="scanned-title">Erkannte Vokabeln (0):</h4>
             <div id="scanned-container"></div>
         </div>
 
-        <button id="start-btn" class="nav-btn" style="display:none;" onclick="initTrainer()">Abfrage starten 🚀</button>
+        <button id="start-btn" class="nav-btn" style="display:none;" onclick="initTrainer()">Gesamte Liste abfragen 🚀</button>
     </div>
 
     <!-- TRAINER SCREEN -->
@@ -125,7 +127,6 @@
     </div>
 </div>
 
-<!-- Logik-Skript einbinden -->
 <script src="app.js"></script>
 </body>
 </html>
