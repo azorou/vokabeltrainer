@@ -113,6 +113,8 @@ async function handleBatchUpload(files) {
     vocabularyPool = [];
     renderList();
     showPreviews(files);
+    setStatus('⏳ Lade Wörterbücher (einmalig, ca. 3–5 MB)…');
+    const dictState = await ensureDicts();
     setStatus('⏳ Initialisiere Texterkennung…');
 
     let currentImg = 0;
@@ -150,7 +152,7 @@ async function handleBatchUpload(files) {
 
     isScanning = false;
     if (vocabularyPool.length) {
-        setStatus(`✅ ${vocabularyPool.length} Vokabeln erkannt${failed ? ` (${failed} Bild(er) fehlgeschlagen)` : ''}. Bitte kurz kontrollieren.`, 'ok');
+                setStatus(`✅ ${vocabularyPool.length} Vokabeln erkannt${failed ? ` (${failed} Bild(er) fehlgeschlagen)` : ''}${dictState.en && dictState.de ? '' : ' – Wörterbuch nicht vollständig geladen, Korrektur eingeschränkt'}. Bitte kurz kontrollieren.`, 'ok');
     } else {
         setStatus('❌ Keine Vokabeln erkannt. Bitte Screenshot mit 3 gut lesbaren Spalten verwenden.', 'error');
     }
@@ -282,14 +284,18 @@ function parseTable(rawWords) {
         const de = joinHyphenated(collect(l2, row)).replace(/[|!•]/g, '').trim();
         const sentence = extractSentence(collect(l3, row)).replace(/\|/g, 'I');
         if (/^[A-Za-z]/.test(en) && en.split(' ').length <= 6 && de.length > 1 && sentence.length > 5) {
-            const inRow = (arr) => arr.filter((w) => w.yc >= row.top && w.yc < row.end);
+                        const inRow = (arr) => arr.filter((w) => w.yc >= row.top && w.yc < row.end);
+            const confMap = (arr) => {
+                const m = {};
+                inRow(arr).forEach((w) => {
+                    const k = w.t.toLowerCase().replace(/[^\p{L}]/gu, '');
+                    if (k) m[k] = Math.min(m[k] ?? 100, w.c ?? 100);
+                });
+                return m;
+            };
+            const confs = { en: confMap(cols[0]), de: confMap(cols[1]), sent: confMap(cols[2]) };
             const enConf = Math.min(100, ...inRow(cols[0]).map((w) => w.c ?? 100));
-            const sentConf = {};
-            inRow(cols[2]).forEach((w) => {
-                const k = w.t.toLowerCase().replace(/[^\p{L}]/gu, '');
-                sentConf[k] = Math.min(sentConf[k] ?? 100, w.c ?? 100);
-            });
-            entries.push(refineEntry({ en, de, sentence }, enConf, sentConf));
+            entries.push(dictRefine(refineEntry({ en, de, sentence }, enConf, confs.sent), confs));
         }
     });
     return entries;
@@ -390,6 +396,146 @@ function refineEntry(e, enConf = 50, sentConf = {}) {
             }
         }
     }
+    if (notes.length) e.fix = notes;
+    return e;
+}
+
+/* ================= Wörterbuch ================= */
+const DICT_SOURCES = {
+    en: { local: 'woerter-en.json', pkg: 'an-array-of-english-words@2.0.0' },
+    de: { local: 'woerter-de.json', pkg: 'an-array-of-german-words@1.2.0' }
+};
+const dicts = { en: null, de: null };
+const CONF_LIMIT = { en: 85, de: 75 };
+const ALPHA = { en: 'abcdefghijklmnopqrstuvwxyz', de: 'abcdefghijklmnopqrstuvwxyzäöüß' };
+const SIMILAR = [['e', 'c'], ['a', 'o'], ['i', 'l'], ['u', 'v'], ['n', 'h'], ['t', 'f'], ['g', 'q'], ['b', 'h']];
+const SKIP_WORDS = new Set(['sb', 'sth', 'etw', 'jmdn', 'jmd', 'jmdm', 'jdn', 'usw', 'bzw', 'fr', 'lat', 'pl', 'adj', 'adv']);
+let dictPromise = null;
+
+async function fetchWordArray(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error('kein Wort-Array');
+    return data;
+}
+
+/** 1. lokale Datei im Repo (falls vorhanden), 2. jsDelivr-Paket (JSON-Datei wird per API gesucht) */
+async function loadDict(lang) {
+    const { local, pkg } = DICT_SOURCES[lang];
+    const attempts = [
+        () => fetchWordArray(local),
+        async () => {
+            const res = await fetch(`https://data.jsdelivr.com/v1/packages/npm/${pkg}?structure=flat`);
+            const meta = await res.json();
+            const file = (meta.files || [])
+                .filter((f) => /\.json$/i.test(f.name) && !/package\.json$/i.test(f.name))
+                .sort((a, b) => b.size - a.size)[0];
+            if (!file) throw new Error('keine JSON-Datei im Paket');
+            return fetchWordArray(`https://cdn.jsdelivr.net/npm/${pkg}${file.name}`);
+        }
+    ];
+    for (const attempt of attempts) {
+        try {
+            const words = await attempt();
+            return new Set(words.map((w) => String(w).toLowerCase()));
+        } catch (err) {
+            console.warn(`Wörterbuch ${lang}: Quelle fehlgeschlagen`, err);
+        }
+    }
+    return null;
+}
+
+function ensureDicts() {
+    if (!dictPromise) {
+        dictPromise = Promise.all([loadDict('en'), loadDict('de')]).then(([en, de]) => {
+            dicts.en = en;
+            dicts.de = de;
+            return { en: !!en, de: !!de };
+        });
+    }
+    return dictPromise;
+}
+
+/** Bekannt = im Wörterbuch, auch mit gängiger Endung (Plural, -ed, -ing, deutsche Beugung) */
+function isKnown(w, lang) {
+    const d = dicts[lang];
+    if (d.has(w)) return true;
+    const suffixes = lang === 'en'
+        ? ['s', 'es', 'd', 'ed', 'ing', 'ly', 'er', 'est', 'ness']
+        : ['e', 'en', 'er', 'es', 'em', 'n', 's', 't', 'te', 'st', 'ten', 'et'];
+    for (const suf of suffixes) {
+        if (w.length > suf.length + 2 && w.endsWith(suf)) {
+            const stem = w.slice(0, -suf.length);
+            if (d.has(stem) || d.has(stem + 'e') || (stem.length > 3 && stem.at(-1) === stem.at(-2) && d.has(stem.slice(0, -1)))) return true;
+        }
+    }
+    if (lang === 'en' && /(ies|ied)$/.test(w) && d.has(w.slice(0, -3) + 'y')) return true;
+    return false;
+}
+
+const isSimilar = (a, b) => SIMILAR.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+
+/** Alle Wörter mit genau 1 Änderung; Score 0 = optisch ähnlicher Buchstabe, 1 = sonstige Änderung */
+function edits1(w, lang) {
+    const out = new Map();
+    const add = (c, s) => { if (!out.has(c) || out.get(c) > s) out.set(c, s); };
+    const A = ALPHA[lang];
+    for (let i = 0; i <= w.length; i++) {
+        if (i < w.length) {
+            add(w.slice(0, i) + w.slice(i + 1), 1);
+            for (const ch of A) if (ch !== w[i]) add(w.slice(0, i) + ch + w.slice(i + 1), isSimilar(ch, w[i]) ? 0 : 1);
+        }
+        for (const ch of A) add(w.slice(0, i) + ch + w.slice(i), 1);
+        if (i < w.length - 1) add(w.slice(0, i) + w[i + 1] + w[i] + w.slice(i + 2), 1);
+    }
+    out.delete(w);
+    return out;
+}
+
+function suggestWord(word, lang, conf) {
+    const w = word.toLowerCase();
+    if (w.length < 3 || SKIP_WORDS.has(w) || isKnown(w, lang)) return null;
+
+    // 1) rn↔m usw. (auch zweifach), nur bei genau einem Treffer
+    const vs = [...new Set(variants(w).flatMap((v) => [v, ...variants(v)]))]
+        .filter((v) => v !== w && isKnown(v, lang));
+    if (vs.length === 1) return vs[0];
+    if (vs.length > 1) return null;
+
+    // 2) Einzelbuchstaben-Fehler, nur bei unsicherer Erkennung
+    if (w.length < 4 || conf >= CONF_LIMIT[lang]) return null;
+    const cands = [...edits1(w, lang)].filter(([c]) => dicts[lang].has(c));
+    if (!cands.length) return null;
+    const minScore = Math.min(...cands.map(([, s]) => s));
+    const best = cands.filter(([, s]) => s === minScore);
+    return best.length === 1 ? best[0][0] : null;     // mehrdeutig → nichts ändern
+}
+
+function matchCase(src, dst) {
+    if (src.length > 1 && src === src.toUpperCase()) return dst.toUpperCase();
+    if (src[0] !== src[0].toLowerCase()) return dst[0].toUpperCase() + dst.slice(1);
+    return dst;
+}
+
+function dictCorrect(text, lang, confMap, label, notes, skipProper) {
+    if (!dicts[lang]) return text;
+    return text.replace(/\p{L}+/gu, (tok, offset) => {
+        if (skipProper && offset > 0 && tok[0] !== tok[0].toLowerCase()) return tok;   // Eigennamen
+        const sug = suggestWord(tok, lang, confMap[tok.toLowerCase()] ?? 70);
+        if (!sug) return tok;
+        const fixed = matchCase(tok, sug);
+        notes.push(`Wörterbuch (${label}): „${tok}“ → „${fixed}“`);
+        return fixed;
+    });
+}
+
+function dictRefine(e, confs) {
+    if (!dicts.en && !dicts.de) return e;
+    const notes = e.fix ? [...e.fix] : [];
+    e.en = dictCorrect(e.en, 'en', confs.en, 'Englisch', notes, false);
+    e.de = dictCorrect(e.de, 'de', confs.de, 'Deutsch', notes, false);
+    e.sentence = dictCorrect(e.sentence, 'en', confs.sent, 'Satz', notes, true);
     if (notes.length) e.fix = notes;
     return e;
 }
