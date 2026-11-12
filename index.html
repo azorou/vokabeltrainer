@@ -117,6 +117,10 @@
         .edit-row .full { grid-column: 1 / -1; font-style: italic; }
         .edit-row .del, .edit-row .del:hover { width: auto; margin: 0; padding: 6px 12px; background: #c0392b; box-shadow: none; transform: none; }
         .edit-row .fix-note { grid-column: 1 / -1; font-size: 12px; color: #9a6700; background: #fff8e1; border-radius: 4px; padding: 4px 8px; }
+        .sync-state { font-size: 12px; color: #6b7c8a; }
+        .conflict-box { background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 12px 15px; margin: 15px 0; text-align: left; }
+        .conflict-box button { width: 100%; margin-top: 8px; }
+    
     </style>
 </head>
 <body>
@@ -125,6 +129,7 @@
 
     <div id="account-bar" class="account-bar" hidden>
         <span id="account-name"></span>
+        <span id="sync-state" class="sync-state" role="status" aria-live="polite"></span>
         <button type="button" id="logout-btn" class="mini secondary">Abmelden</button>
     </div>
 
@@ -144,11 +149,18 @@
             <button type="button" id="guest-btn" class="link-btn">Ohne Konto fortfahren</button>
         </form>
         <div id="login-msg" class="status" style="color:#c0392b;" role="alert" hidden></div>
-        <span class="hint">Konten und Vokabeln werden nur in diesem Browser gespeichert (kein Abgleich zwischen Geräten). Nutze die Sicherungsdatei als Backup.</span>
+        <span class="hint">Dein Konto liegt in der Cloud, deine Vokabeln sind auf jedem Gerät verfügbar. Es gibt keine Passwort-Wiederherstellung: Merke dir dein Passwort oder speichere eine Sicherung.</span>
     </div>
 
     <!-- SCANNER / LISTE -->
     <div id="scan-screen" hidden>
+        <div id="conflict-box" class="conflict-box" role="alertdialog" aria-labelledby="conflict-title" tabindex="-1" hidden>
+    <strong id="conflict-title">Auf einem anderen Gerät wurde die Liste geändert.</strong>
+    <p id="conflict-text"></p>
+    <button type="button" id="cf-merge" class="nav-btn">Zusammenführen (fehlende Vokabeln ergänzen)</button>
+    <button type="button" id="cf-cloud" class="nav-btn secondary">Cloud-Version übernehmen</button>
+    <button type="button" id="cf-local" class="nav-btn secondary">Version dieses Geräts behalten</button>
+</div>
         <h1>Vokabeltrainer</h1>
         <p class="lead">Lade Screenshots deiner Vokabelseiten hoch (3 Spalten: Englisch | Deutsch | Beispielsatz).</p>
 
