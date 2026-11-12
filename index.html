@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KI Vokabel-Scanner & Trainer Pro</title>
+    <title>Vokabeltrainer</title>
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -27,6 +27,10 @@
             text-align: center;
         }
         h1 { color: #2c3e50; font-size: 26px; margin-top: 0; }
+        .lead { color: #6b7c8a; margin-bottom: 20px; }
+
+        .account-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 14px; color: #4a5568; }
+
         .upload-zone {
             display: block;
             border: 3px dashed #3498db;
@@ -43,24 +47,31 @@
 
         .status { font-weight: bold; margin: 15px 0; font-size: 15px; line-height: 1.4; }
 
-        .scanned-list { text-align: left; max-height: 250px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; }
+        .field { display: block; text-align: left; margin: 12px 0; }
+        .field > span { display: block; font-size: 13px; color: #4a5568; margin-bottom: 4px; }
+        select, input[type="text"], input[type="password"] {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            border: 2px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+            background: white;
+        }
+        select:focus, input[type="text"]:focus, input[type="password"]:focus { border-color: #3498db; }
+        #user-input { width: 85%; font-size: 18px; text-align: center; }
+
+        .scanned-list { text-align: left; max-height: 340px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; }
         .scanned-list h2 { margin: 0 0 6px; font-size: 16px; color: #2c3e50; }
+
+        details.manual { text-align: left; background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 15px; margin: 15px 0; }
+        details.manual summary { cursor: pointer; font-weight: bold; color: #2c3e50; }
 
         .phase-badge { background: #34495e; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
         .word-display { font-size: 32px; font-weight: bold; color: #2c3e50; margin: 25px 0 15px; }
         .sentence-box { background: #eef2f7; padding: 18px; border-radius: 8px; font-style: italic; color: #4a5568; margin: 20px 0; line-height: 1.5; font-size: 16px; border-left: 5px solid #3498db; text-align: left; }
-
-        input[type="text"] {
-            width: 85%;
-            padding: 14px;
-            border: 2px solid #cbd5e1;
-            border-radius: 8px;
-            font-size: 18px;
-            outline: none;
-            transition: border-color 0.2s;
-            text-align: center;
-        }
-        input[type="text"]:focus { border-color: #3498db; }
 
         button {
             background-color: #2ecc71;
@@ -77,10 +88,18 @@
             transition: all 0.2s;
         }
         button:hover { background-color: #27ae60; transform: translateY(-1px); }
-        button.nav-btn { background-color: #3498db; }
+        button.nav-btn { background-color: #3498db; box-shadow: 0 4px 6px rgba(52, 152, 219, 0.2); }
         button.nav-btn:hover { background-color: #2980b9; }
         button.secondary { background-color: #7f8c8d; box-shadow: none; }
         button.secondary:hover { background-color: #6c7a7b; }
+        button.danger { background-color: #c0392b; box-shadow: none; }
+        button.danger:hover { background-color: #a93226; }
+        button.mini { width: auto; margin: 0; padding: 6px 12px; font-size: 13px; }
+        button.link-btn { background: none; color: #2980b9; box-shadow: none; text-decoration: underline; width: auto; padding: 8px; font-weight: normal; }
+        button.link-btn:hover { background: none; transform: none; color: #1c5d8a; }
+        .tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; }
+        .tools button { width: auto; margin: 0; padding: 8px 14px; font-size: 13px; }
+        .check { display: flex; align-items: center; gap: 8px; justify-content: center; font-size: 13px; color: #4a5568; margin: 10px 0; }
 
         .feedback { font-size: 20px; font-weight: bold; margin-top: 20px; }
         .feedback.correct { color: #1e8449; }
@@ -94,7 +113,7 @@
         .hint { display: block; font-size: 12px; color: #6b7c8a; margin-top: 6px; }
 
         .edit-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #edf2f7; }
-        .edit-row input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 14px; text-align: left; }
+        .edit-row input[type="text"] { width: 100%; padding: 6px 8px; font-size: 14px; text-align: left; }
         .edit-row .full { grid-column: 1 / -1; font-style: italic; }
         .edit-row .del, .edit-row .del:hover { width: auto; margin: 0; padding: 6px 12px; background: #c0392b; box-shadow: none; transform: none; }
         .edit-row .fix-note { grid-column: 1 / -1; font-size: 12px; color: #9a6700; background: #fff8e1; border-radius: 4px; padding: 4px 8px; }
@@ -103,10 +122,35 @@
 <body>
 
 <div class="container">
-    <!-- SCANNER SCREEN -->
-    <div id="scan-screen">
-        <h1>📸 Screenshot Vokabel-Scanner</h1>
-        <p style="color:#6b7c8a; margin-bottom:25px;">Wähle einen oder <strong>mehrere Screenshots</strong> deiner Vokabelseiten aus (3 Spalten: Englisch | Deutsch | Beispielsatz).</p>
+
+    <div id="account-bar" class="account-bar" hidden>
+        <span id="account-name"></span>
+        <button type="button" id="logout-btn" class="mini secondary">Abmelden</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="login-screen">
+        <h1>Vokabeltrainer</h1>
+        <p class="lead">Melde dich an, damit deine Vokabeln gespeichert bleiben.</p>
+        <form id="login-form">
+            <label class="field"><span>Benutzername</span>
+                <input type="text" id="login-user" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+            </label>
+            <label class="field"><span>Passwort</span>
+                <input type="password" id="login-pass" autocomplete="current-password" required>
+            </label>
+            <button type="submit" class="nav-btn">Anmelden</button>
+            <button type="button" id="register-btn" class="nav-btn secondary">Neues Konto erstellen</button>
+            <button type="button" id="guest-btn" class="link-btn">Ohne Konto fortfahren</button>
+        </form>
+        <div id="login-msg" class="status" style="color:#c0392b;" role="alert" hidden></div>
+        <span class="hint">Konten und Vokabeln werden nur in diesem Browser gespeichert (kein Abgleich zwischen Geräten). Nutze die Sicherungsdatei als Backup.</span>
+    </div>
+
+    <!-- SCANNER / LISTE -->
+    <div id="scan-screen" hidden>
+        <h1>Vokabeltrainer</h1>
+        <p class="lead">Lade Screenshots deiner Vokabelseiten hoch (3 Spalten: Englisch | Deutsch | Beispielsatz).</p>
 
         <label class="upload-zone" for="file-input" id="upload-zone" tabindex="0">
             <strong>Klicke hier, um Bilder auszuwählen</strong>
@@ -115,21 +159,49 @@
         </label>
         <input type="file" id="file-input" class="sr-only" accept="image/*" multiple>
 
+        <label class="check"><input type="checkbox" id="autofix" checked> Automatische Korrektur (Wörterbuch &amp; Kontext)</label>
+
         <div id="status-text" class="status" role="status" aria-live="polite" hidden></div>
 
+        <details class="manual" id="manual-box">
+            <summary>➕ Vokabel manuell hinzufügen</summary>
+            <form id="manual-form">
+                <label class="field"><span>Englisch (z. B. to tower)</span><input type="text" id="m-en" autocomplete="off" required></label>
+                <label class="field"><span>Deutsch</span><input type="text" id="m-de" autocomplete="off" required></label>
+                <label class="field"><span>Beispielsatz (optional, nötig für den Lückentext)</span><input type="text" id="m-sent" autocomplete="off"></label>
+                <button type="submit" class="nav-btn">Hinzufügen</button>
+            </form>
+        </details>
+
         <div class="scanned-list" id="scanned-box" hidden>
-            <h2 id="scanned-title">Erkannte Vokabeln (0)</h2>
-            <span class="hint" style="margin-bottom:12px;">Die Texterkennung ist nicht perfekt: Felder kannst du direkt korrigieren, ✕ löscht einen Eintrag.</span>
+            <h2 id="scanned-title">Vokabeln (0)</h2>
+            <span class="hint" style="margin-bottom:12px;">Felder kannst du direkt korrigieren, ✕ löscht einen Eintrag. Von dir bearbeitete Wörter werden nie mehr automatisch geändert.</span>
             <div id="scanned-container"></div>
         </div>
 
-        <button type="button" id="start-btn" class="nav-btn" hidden>Gesamte Liste abfragen 🚀</button>
-        <button type="button" id="load-btn" class="nav-btn secondary" hidden>💾 Gespeicherte Liste laden</button>
+        <div id="quiz-setup" hidden>
+            <label class="field" for="mode-select"><span>Abfrage-Modus</span>
+                <select id="mode-select">
+                    <option value="translate">Deutsch ➔ Englisch</option>
+                    <option value="gap">Lückentext (Beispielsatz, 3. Spalte)</option>
+                    <option value="both">Übersetzen + Lückentext nacheinander</option>
+                    <option value="reverse">Englisch ➔ Deutsch</option>
+                </select>
+            </label>
+            <button type="button" id="start-btn" class="nav-btn">Abfrage starten 🚀</button>
+        </div>
+
+        <div class="tools">
+            <button type="button" id="export-btn" class="secondary" hidden>⬇ Sicherung speichern</button>
+            <button type="button" id="import-btn" class="secondary">⬆ Sicherung laden</button>
+            <button type="button" id="clear-btn" class="danger" hidden>🗑 Liste leeren</button>
+        </div>
+        <input type="file" id="import-input" class="sr-only" accept="application/json,.json">
     </div>
 
-    <!-- TRAINER SCREEN -->
+    <!-- TRAINER -->
     <div id="trainer-screen" hidden>
-        <span class="phase-badge" id="phase-title">Runde 1: Deutsch ➔ Englisch</span>
+        <span class="phase-badge" id="phase-title">Deutsch ➔ Englisch</span>
         <div class="word-display" id="question-display">-</div>
         <div class="sentence-box" id="sentence-box" hidden></div>
 
@@ -139,9 +211,10 @@
 
         <div class="feedback" id="feedback-display" role="status" aria-live="polite"></div>
         <div class="stats-info" id="stats-display"></div>
+        <button type="button" id="quit-btn" class="link-btn">Abbrechen und zurück zur Liste</button>
     </div>
 
-    <!-- END SCREEN -->
+    <!-- ENDE -->
     <div id="end-screen" hidden>
         <h1>🎓 Geschafft!</h1>
         <p id="end-text"></p>
