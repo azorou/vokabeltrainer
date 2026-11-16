@@ -19,11 +19,11 @@
             background-color: #f0f4f8;
             color: #333;
             margin: 0;
-            padding: 20px;
+           box-sizing: border-box;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
+            min-height: 100dvh;
         }
         .container {
             background-color: white;
@@ -128,13 +128,34 @@
         .sync-state { font-size: 12px; color: #6b7c8a; }
         .conflict-box { background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 12px 15px; margin: 15px 0; text-align: left; }
         .conflict-box button { width: 100%; margin-top: 8px; }
-    
+    html { -webkit-tap-highlight-color: transparent; }
+body {
+    padding-top: calc(20px + env(safe-area-inset-top));
+    padding-right: calc(20px + env(safe-area-inset-right));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-left: calc(20px + env(safe-area-inset-left));
+}
+.scanned-list { overscroll-behavior: contain; }
+.install-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; background: #eaf4fd; border: 1px solid #bcdcf5; border-radius: 8px; padding: 10px 12px; margin-bottom: 15px; font-size: 13px; color: #2c3e50; }
+.ios-hint { margin: 0; text-align: left; flex: 1 1 220px; }
+
+/* Installierte App */
+@media (display-mode: standalone) {
+    html, body { overscroll-behavior: none; }
+    body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    input, textarea, select { -webkit-user-select: text; user-select: text; }
+    #install-bar { display: none !important; }
+}
     </style>
 </head>
 <body>
 
 <div class="container">
-
+<div id="install-bar" class="install-bar" hidden>
+    <button type="button" id="install-btn" class="nav-btn mini" hidden>📲 App installieren</button>
+    <p id="ios-hint" class="ios-hint" hidden>Auf iPhone/iPad: In <strong>Safari</strong> auf <strong>Teilen</strong> (⎙) tippen, dann <strong>„Zum Home-Bildschirm“</strong>.</p>
+    <button type="button" id="install-dismiss" class="link-btn">Schließen</button>
+</div>
     <div id="account-bar" class="account-bar" hidden>
         <span id="account-name"></span>
         <span id="sync-state" class="sync-state" role="status" aria-live="polite"></span>
