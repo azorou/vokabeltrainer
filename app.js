@@ -1208,4 +1208,50 @@ function init() {
     showScreen('login');
 }
 
+/* ================= PWA ================= */
+let installPrompt = null;
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function setupPwa() {
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service Worker fehlgeschlagen', err));
+        });
+    }
+
+    const DISMISS_KEY = 'vokabeltrainer.installDismissed';
+    const bar = $('install-bar');
+    const btn = $('install-btn');
+    const hint = $('ios-hint');
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(DISMISS_KEY) === '1'; } catch (e) { /* egal */ }
+    if (isStandalone() || dismissed) return;
+
+    // Android / Desktop (Chrome, Edge)
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        installPrompt = e;
+        hint.hidden = true;
+        btn.hidden = false;
+        bar.hidden = false;
+    });
+    window.addEventListener('appinstalled', () => { installPrompt = null; bar.hidden = true; });
+    btn.addEventListener('click', async () => {
+        if (!installPrompt) return;
+        installPrompt.prompt();
+        await installPrompt.userChoice.catch(() => {});
+        installPrompt = null;
+        bar.hidden = true;
+    });
+    $('install-dismiss').addEventListener('click', () => {
+        bar.hidden = true;
+        try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) { /* egal */ }
+    });
+
+    // iOS: kein beforeinstallprompt, nur Hinweis
+    if (isIos()) { btn.hidden = true; hint.hidden = false; bar.hidden = false; }
+}
+
+setupPwa();
 init();
