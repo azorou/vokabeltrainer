@@ -9,30 +9,38 @@ const GAP = '_____';
 const $ = (id) => document.getElementById(id);
 
 const LANGS = {
-    fr: { name: 'Französisch', ocr: 'fra+deu', dict: ['fr', 'de'] },
-    en: { name: 'Englisch', ocr: 'eng+deu', dict: ['en', 'de'] }
+    fr: { name: 'Französisch', adj: 'französischen', ocr: 'fra+deu', dict: ['fr', 'de'] },
+    en: { name: 'Englisch', adj: 'englischen', ocr: 'eng+deu', dict: ['en', 'de'] }
 };
+const DEFAULT_SETTINGS = { intervals: [0, 1, 3, 7, 14, 30], onWrong: 'reset', newPerDay: 10, dailyLimit: 40, dailyGoal: 20 };
 
 let account = null;
 let currentLang = 'fr';
 let currentTab = 'learn';
-let vocabularyPool = [];            // alle Sprachen: {id, lang, term, de, sentence, gaps, path, phase, due, ok, bad, fix?}
+let vocabularyPool = [];            // alle Sprachen
 const confirmedWords = new Set();   // vom Nutzer bestätigte Wörter: nie automatisch ändern
 let protectedWords = new Set();     // Wörter aus Stichwörtern: nie automatisch ändern
 const deselected = new Set();       // abgewählte Bereiche beim Üben
 const openSections = new Set();
 let listQuery = '';
+let settings = { ...DEFAULT_SETTINGS, intervals: [...DEFAULT_SETTINGS.intervals] };
+let stats = { days: {} };
 
+let sessionKind = 'free';           // 'free' | 'daily' | 'trouble'
 let sessionPool = [];
+let sessionDone = new Set();
 let activeList = [];
 let wrongAnswers = [];
 let roundQueue = [];
 let currentIndex = 0;
-let mode = 'translate';             // 'translate' | 'reverse' | 'gap'
+let mode = 'translate';             // Modus der freien Übung
+let qMode = 'translate';            // Modus der aktuellen Frage
 let isRetry = false;
 let isShowingResolution = false;
 let mistakeCount = 0;
 let answeredCount = 0;
+let promoted = 0;
+let demoted = 0;
 let isScanning = false;
 let previewUrls = [];
 let clearTimer = null;
@@ -88,6 +96,7 @@ const sameVocab = (a, b) => a.lang === b.lang && norm(a.term) === norm(b.term);
 const langPool = () => vocabularyPool.filter((v) => v.lang === currentLang);
 const autofixOn = () => { const el = $('autofix'); return !el || el.checked; };
 const normGapMarks = (s) => String(s).replace(/_{2,}/g, GAP);
+const clampInt = (v, lo, hi, def) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def; };
 
 function setStatus(msg, type = 'busy') {
     const el = $('status-text');
@@ -125,16 +134,80 @@ function setLang(lang) {
     refreshAll();
 }
 function updateAddLabels() {
-    $('m-term-label').textContent = `${LANGS[currentLang].name} (z. B. ${currentLang === 'fr' ? 'le raté / la ratée' : 'to tower'})`;
-    const n = langPool().length;
-    $('clear-btn').textContent = `🗑 Alle ${LANGS[currentLang].name === 'Französisch' ? 'französischen' : 'englischen'} Vokabeln löschen`;
-    $('clear-btn').hidden = n === 0;
+    const L = LANGS[currentLang];
+    $('m-term-label').textContent = `${L.name} (z. B. ${currentLang === 'fr' ? 'le raté / la ratée' : 'to tower'})`;
+    $('clear-btn').textContent = `Alle ${L.adj} Vokabeln löschen`;
+    $('clear-btn').hidden = langPool().length === 0;
     $('export-btn').hidden = vocabularyPool.length === 0;
 }
 
-/* ================= Daten bereinigen ================= */
-const clampInt = (v, lo, hi, def) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def; };
+/* ================= Datum, Einstellungen, Statistik ================= */
+const dateKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** Fälligkeit: 0 Tage = sofort, sonst Mitternacht (lokal) in n Tagen */
+const dueTs = (days) => {
+    const d = new Date();
+    if (days <= 0) return d.getTime();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + days);
+    return d.getTime();
+};
+const todayStats = () => stats.days[dateKey()] || { n: 0, ok: 0, nw: 0 };
+function touchToday() {
+    const k = dateKey();
+    if (!stats.days[k]) stats.days[k] = { n: 0, ok: 0, nw: 0 };
+    return stats.days[k];
+}
+function streakDays() {
+    const d = new Date();
+    if (!(stats.days[dateKey(d)] && stats.days[dateKey(d)].n)) d.setDate(d.getDate() - 1);
+    let n = 0;
+    while (stats.days[dateKey(d)] && stats.days[dateKey(d)].n) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+}
+function relDay(ts) {
+    const a = new Date(); a.setHours(0, 0, 0, 0);
+    const b = new Date(ts); b.setHours(0, 0, 0, 0);
+    const diff = Math.round((b - a) / 86400000);
+    if (diff <= 0) return 'heute';
+    if (diff === 1) return 'morgen';
+    return `in ${diff} Tagen`;
+}
 
+function sanitizeSettings(raw) {
+    const r = raw && typeof raw === 'object' ? raw : {};
+    const iv = Array.isArray(r.intervals) && r.intervals.length === 6
+        ? r.intervals.map((n, i) => clampInt(n, 0, 365, DEFAULT_SETTINGS.intervals[i]))
+        : [...DEFAULT_SETTINGS.intervals];
+    return {
+        intervals: iv,
+        onWrong: r.onWrong === 'back' ? 'back' : 'reset',
+        newPerDay: clampInt(r.newPerDay, 0, 200, DEFAULT_SETTINGS.newPerDay),
+        dailyLimit: clampInt(r.dailyLimit, 1, 500, DEFAULT_SETTINGS.dailyLimit),
+        dailyGoal: clampInt(r.dailyGoal, 1, 500, DEFAULT_SETTINGS.dailyGoal)
+    };
+}
+function sanitizeStats(raw) {
+    const days = {};
+    const src = raw && raw.days && typeof raw.days === 'object' ? raw.days : {};
+    Object.keys(src).forEach((k) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+        const d = src[k] || {};
+        days[k] = { n: clampInt(d.n, 0, 100000, 0), ok: clampInt(d.ok, 0, 100000, 0), nw: clampInt(d.nw, 0, 100000, 0) };
+    });
+    const keys = Object.keys(days).sort();
+    keys.slice(0, Math.max(0, keys.length - 400)).forEach((k) => delete days[k]);
+    return { days };
+}
+function mergeStats(a, b) {
+    const days = { ...a.days };
+    Object.keys(b.days).forEach((k) => {
+        const x = days[k], y = b.days[k];
+        days[k] = x ? { n: Math.max(x.n, y.n), ok: Math.max(x.ok, y.ok), nw: Math.max(x.nw, y.nw) } : y;
+    });
+    return { days };
+}
+
+/* ================= Daten bereinigen ================= */
 function sanitizePool(arr) {
     return (Array.isArray(arr) ? arr : []).map((v) => {
         if (!v) return null;
@@ -153,7 +226,8 @@ function sanitizePool(arr) {
             phase: clampInt(v.phase, 1, 6, 1),
             due: Number(v.due) || 0,
             ok: Number(v.ok) || 0,
-            bad: Number(v.bad) || 0
+            bad: Number(v.bad) || 0,
+            streak: clampInt(v.streak, 0, 1000, 0)
         };
     }).filter(Boolean);
 }
@@ -179,11 +253,11 @@ let saving = false;
 let syncBlocked = false;
 
 const SYNC_TEXT = {
-    saved: '☁ gespeichert',
-    saving: '☁ speichert…',
-    dirty: '☁ ungespeichert',
-    offline: '⚠ offline, wird später gespeichert',
-    conflict: '⚠ Konflikt',
+    saved: 'Gespeichert',
+    saving: 'Speichert...',
+    dirty: 'Nicht gespeichert',
+    offline: 'Offline, wird später gespeichert',
+    conflict: 'Konflikt',
     none: ''
 };
 function setSync(state) {
@@ -192,18 +266,24 @@ function setSync(state) {
 }
 
 const dataKey = () => `vokabeltrainer.data.v2.${account.guest ? 'guest' : account.id}`;
-const payload = () => ({ v: 2, pool: vocabularyPool, confirmed: [...confirmedWords] });
+const payload = () => ({ v: 3, pool: vocabularyPool, confirmed: [...confirmedWords], settings, stats });
+
+function applyPayloadExtras(data) {
+    settings = sanitizeSettings(data && data.settings);
+    stats = sanitizeStats(data && data.stats);
+}
 
 function writeCache() {
     try {
         localStorage.setItem(dataKey(), JSON.stringify({ ...payload(), base: syncMeta.base, dirty: syncMeta.dirty }));
     } catch (e) {
-        setStatus('⚠ Lokales Speichern nicht möglich (Speicher voll oder privater Modus).', 'error');
+        setStatus('Lokales Speichern nicht möglich (Speicher voll oder privater Modus).', 'error');
     }
 }
 function loadLocal() {
     vocabularyPool = [];
     confirmedWords.clear();
+    applyPayloadExtras(null);
     syncMeta = { base: null, dirty: false };
     try {
         let data = JSON.parse(localStorage.getItem(dataKey()) || 'null');
@@ -214,6 +294,7 @@ function loadLocal() {
         if (data) {
             vocabularyPool = sanitizePool(data.pool);
             (data.confirmed || []).forEach((w) => confirmedWords.add(String(w)));
+            applyPayloadExtras(data);
             if (!account.guest) syncMeta = { base: data.base || null, dirty: !!data.dirty };
         }
     } catch (e) { /* leer starten */ }
@@ -236,9 +317,11 @@ function applyRemote(row) {
     vocabularyPool = sanitizePool(d.pool);
     confirmedWords.clear();
     (d.confirmed || []).forEach((w) => confirmedWords.add(String(w)));
+    applyPayloadExtras(d);
     syncMeta = { base: row.updated_at, dirty: false };
     rebuildProtected();
     writeCache();
+    syncSettingsUI();
     refreshAll();
     setSync('saved');
 }
@@ -317,6 +400,7 @@ async function resolveConflict() {
                         if (!vocabularyPool.some((x) => sameVocab(x, v))) vocabularyPool.push(v);
                     });
                     (d.confirmed || []).forEach((w) => confirmedWords.add(String(w)));
+                    stats = mergeStats(stats, sanitizeStats(d.stats));
                 }
                 syncMeta.base = row.updated_at;
                 syncMeta.dirty = true;
@@ -368,10 +452,11 @@ async function enterAccount(acc) {
     if (acc.guest) sessionStorage.setItem(SESSION_KEY, 'guest');
     else sessionStorage.removeItem(SESSION_KEY);
     loadLocal();
-    $('account-name').textContent = acc.guest ? '👤 Gast (nur dieses Gerät)' : `👤 ${acc.name}`;
+    $('account-name').textContent = acc.guest ? 'Gast (nur dieses Gerät)' : acc.name;
     $('login-pass').value = '';
     setStatus('');
     setSync(acc.guest ? 'none' : (syncMeta.dirty ? 'dirty' : 'saved'));
+    syncSettingsUI();
 
     let lang = null;
     try { const s = localStorage.getItem(LANG_KEY); if (s === 'fr' || s === 'en') lang = s; } catch (e) { /* egal */ }
@@ -420,7 +505,7 @@ async function authSubmit(kind) {
     if (!sb) return msg('Der Konto-Dienst konnte nicht geladen werden (Internet prüfen).');
     const name = $('login-user').value.trim().toLowerCase();
     const pw = $('login-pass').value;
-    if (!/^[a-z0-9_.-]{3,24}$/.test(name)) return msg('Benutzername: 3–24 Zeichen (Buchstaben, Zahlen, _ . -).');
+    if (!/^[a-z0-9_.-]{3,24}$/.test(name)) return msg('Benutzername: 3 bis 24 Zeichen (Buchstaben, Zahlen, _ . -).');
     if (pw.length < 6) return msg('Das Passwort braucht mindestens 6 Zeichen.');
 
     const buttons = $('login-form').querySelectorAll('button');
@@ -462,12 +547,15 @@ async function importBackup(file) {
             if (!vocabularyPool.some((x) => sameVocab(x, v))) { vocabularyPool.push(v); added++; }
         });
         (data.confirmed || []).forEach((w) => confirmedWords.add(String(w)));
+        if (data.settings) settings = sanitizeSettings(data.settings);
+        if (data.stats) stats = mergeStats(stats, sanitizeStats(data.stats));
         rebuildProtected();
         savePool();
+        syncSettingsUI();
         refreshAll();
-        setStatus(`✅ Sicherung geladen: ${added} neue Vokabeln.`, 'ok');
+        setStatus(`Sicherung geladen: ${added} neue Vokabeln.`, 'ok');
     } catch (e) {
-        setStatus('❌ Die Datei konnte nicht gelesen werden.', 'error');
+        setStatus('Die Datei konnte nicht gelesen werden.', 'error');
     }
 }
 
@@ -606,7 +694,7 @@ function suggestWord(word, lang, conf) {
     const w = word.toLowerCase();
     if (!d || w.length < 3 || SKIP_WORDS.has(w) || isProtected(w) || isKnown(w, lang)) return null;
 
-    // 1) rn↔m usw.: Ergebnis muss ein echtes Wörterbuchwort sein, genau ein Treffer
+    // 1) rn/m usw.: Ergebnis muss ein echtes Wörterbuchwort sein, genau ein Treffer
     if (conf < CONFUSION_CONF[lang]) {
         const vs = variants(w).filter((v) => d.has(v));
         if (vs.length === 1) return vs[0];
@@ -623,7 +711,7 @@ function suggestWord(word, lang, conf) {
         if (!cands.length) return null;
         const min = Math.min(...cands.map(([, s]) => s));
         const best = cands.filter(([, s]) => s === min);
-        return best.length === 1 ? best[0][0] : null;     // mehrdeutig → nichts ändern
+        return best.length === 1 ? best[0][0] : null;     // mehrdeutig: nichts ändern
     }
     return null;
 }
@@ -654,7 +742,7 @@ function adaptSentence(e, sentConf, notes) {
     if (base.length < 3 || !e.sentence) return;
     const stem = stemOf(base);
     const tokens = [...e.sentence.matchAll(/\p{L}+/gu)];
-    if (tokens.some((m) => m[0].toLowerCase().startsWith(stem))) return;   // Stichwort kommt vor → nichts tun
+    if (tokens.some((m) => m[0].toLowerCase().startsWith(stem))) return;   // Stichwort kommt vor: nichts tun
 
     let best = null;
     for (const m of tokens) {
@@ -690,7 +778,7 @@ function adaptSentence(e, sentConf, notes) {
 function refineEntry(e, confs, lang) {
     const notes = [];
     const labels = { term: 'Stichwort', de: 'Deutsch', sentence: 'Satz' };
-    // Zeichenverwechslungen mitten im Wort (0→o, 1/|→l, großes I→l)
+    // Zeichenverwechslungen mitten im Wort (0 → o, 1 oder | → l, großes I → l)
     const fixChars = (s) => s
         .replace(/(\p{L})0(?=\p{L})/gu, '$1o')
         .replace(/(\p{L})[1|](?=\p{L})/gu, '$1l')
@@ -792,7 +880,7 @@ function extractHeader(canvas) {
     const img = ctx.getImageData(0, y0, w, hh);
     const px = img.data;
     for (let o = 0; o < px.length; o += 4) {
-        const v = lumOf(px[o], px[o + 1], px[o + 2]) > 170 ? 0 : 255;   // heller Text → schwarz
+        const v = lumOf(px[o], px[o + 1], px[o + 2]) > 170 ? 0 : 255;   // heller Text wird schwarz
         px[o] = px[o + 1] = px[o + 2] = v;
         px[o + 3] = 255;
     }
@@ -864,7 +952,7 @@ function normalizeCanvas(canvas) {
     ctx.putImageData(img, 0, 0);
 }
 
-/** Ein Bild → 1 oder 2 Seiten (Doppelseiten werden geteilt) */
+/** Ein Bild ergibt 1 oder 2 Seiten (Doppelseiten werden geteilt) */
 async function preparePages(file) {
     const bmp = await createImageBitmap(file);
     try {
@@ -899,7 +987,7 @@ async function handleBatchUpload(files) {
     files = [...files].filter((f) => f.type.startsWith('image/'));
     if (!files.length || isScanning) return;
     if (typeof Tesseract === 'undefined') {
-        setStatus('❌ Texterkennung konnte nicht geladen werden (Internet prüfen).', 'error');
+        setStatus('Fehler: Texterkennung konnte nicht geladen werden (Internet prüfen).', 'error');
         return;
     }
 
@@ -909,10 +997,10 @@ async function handleBatchUpload(files) {
     const L = LANGS[lang];
     let dictState = {};
     if (autofixOn()) {
-        setStatus('⏳ Lade Wörterbücher (einmalig, einige MB)…');
+        setStatus('Lade Wörterbücher (einmalig, einige MB)...');
         dictState = await ensureDicts(L.dict);
     }
-    setStatus('⏳ Initialisiere Texterkennung (beim ersten Mal ein größerer Download)…');
+    setStatus('Initialisiere Texterkennung (beim ersten Mal ein größerer Download)...');
 
     const ctx = makeContext();
     let step = '';
@@ -921,12 +1009,12 @@ async function handleBatchUpload(files) {
     try {
         worker = await Tesseract.createWorker(L.ocr, 1, {
             logger: (m) => {
-                if (m.status === 'recognizing text') setStatus(`⏳ ${step}: ${Math.round(m.progress * 100)} %`);
+                if (m.status === 'recognizing text') setStatus(`${step}: ${Math.round(m.progress * 100)} %`);
             }
         });
         for (let i = 0; i < files.length; i++) {
             step = `Bild ${i + 1}/${files.length}`;
-            setStatus(`⏳ Bereite ${step} vor…`);
+            setStatus(`Bereite ${step} vor...`);
             try {
                 const prep = await preparePages(files[i]);
                 boxes += prep.boxes;
@@ -949,7 +1037,7 @@ async function handleBatchUpload(files) {
         }
     } catch (err) {
         console.error(err);
-        setStatus('❌ Die Texterkennung konnte nicht gestartet werden.', 'error');
+        setStatus('Fehler: Die Texterkennung konnte nicht gestartet werden.', 'error');
         isScanning = false;
         return;
     } finally {
@@ -961,9 +1049,9 @@ async function handleBatchUpload(files) {
     const dictNote = autofixOn() && L.dict.some((l) => !dictState[l]) ? ' Wörterbuch nicht vollständig geladen, Korrektur eingeschränkt.' : '';
     if (added) {
         const areas = [...ctx.seen].slice(0, 6).join(', ') || 'keine erkannt';
-        setStatus(`✅ ${added} neue Vokabeln erkannt${solved ? `, ${solved} Lücken-Lösungen zugeordnet` : ''}${boxes ? `, ${boxes} Kasten entfernt` : ''}${failed ? `, ${failed} Bild(er) fehlgeschlagen` : ''}. Bereiche: ${areas}.${dictNote} Bitte unter „Listen“ kurz kontrollieren.`, 'ok');
+        setStatus(`${added} neue Vokabeln erkannt${solved ? `, ${solved} Lücken-Lösungen zugeordnet` : ''}${boxes ? `, ${boxes} Kasten entfernt` : ''}${failed ? `, ${failed} Bild(er) fehlgeschlagen` : ''}. Bereiche: ${areas}.${dictNote} Bitte unter „Listen“ kurz kontrollieren.`, 'ok');
     } else {
-        setStatus(`❌ Keine neuen Vokabeln erkannt${failed ? ` (${failed} Bild(er) fehlgeschlagen)` : ''}. Prüfe, ob die richtige Sprache oben gewählt ist, und nutze gut lesbare Seiten mit 3 Spalten.`, 'error');
+        setStatus(`Keine neuen Vokabeln erkannt${failed ? ` (${failed} Bild(er) fehlgeschlagen)` : ''}. Prüfe, ob die richtige Sprache oben gewählt ist, und nutze gut lesbare Seiten mit 3 Spalten.`, 'error');
     }
 }
 
@@ -1105,7 +1193,7 @@ function extractSentence(lines, lang) {
     return fixPunct(lang === 'fr' ? joinFrench(out) : joinHyphenated(out));
 }
 
-/** Lücken des Buchs ("-" + hochgestellte Nummer) → "_____", Nummern merken */
+/** Lücken des Buchs ("-" + hochgestellte Nummer) werden zu "_____", die Nummern werden gemerkt */
 function convertGaps(sentence) {
     const toks = sentence.split(/\s+/).filter(Boolean);
     const out = [];
@@ -1166,7 +1254,7 @@ function applyHeadings(ctx, items) {
     });
 }
 
-/* ---- Lösungskästen ("1 s'allume 2 rejoins …") ---- */
+/* ---- Lösungskästen ("1 s'allume 2 rejoins ...") ---- */
 function isSolutionLine(l, medH) {
     const nums = [];
     l.words.forEach((w) => { if (/^\d{1,2}$/.test(w.t)) nums.push(Number(w.t)); });
@@ -1329,7 +1417,7 @@ async function openCamera() {
             audio: false
         });
     } catch (e) {
-        setStatus('ℹ️ Kamera-Zugriff nicht möglich, die Foto-App wird geöffnet.', 'busy');
+        setStatus('Kamera-Zugriff nicht möglich, die Foto-App wird geöffnet.', 'busy');
         $('cam-input').click();
         return;
     }
@@ -1369,9 +1457,9 @@ function makeGap(item) {
 }
 const countGaps = (s) => (s.match(/_____/g) || []).length;
 const numberGaps = (s, n) => { if (n < 2) return s; let i = 0; return s.replace(/_____/g, () => `(${++i}) ${GAP}`); };
-const fillGaps = (s, answers) => { let i = 0; return s.replace(/_____/g, () => answers[i++] ?? '…'); };
+const fillGaps = (s, answers) => { let i = 0; return s.replace(/_____/g, () => answers[i++] ?? '...'); };
 
-/** Alternativen einer Lösung: "désolé/e" → désolé, désolée */
+/** Alternativen einer Lösung: "désolé/e" ergibt désolé und désolée */
 function altList(a) {
     const s = String(a).trim();
     if (!s.includes('/')) return [s];
@@ -1456,12 +1544,77 @@ function judgeDe(answer, item) {
     return null;
 }
 
+/* ================= Phasen-System ================= */
+const isNew = (v) => v.ok + v.bad === 0;
+
+function dueList(pool) {
+    const now = Date.now();
+    const review = pool.filter((v) => !isNew(v) && v.due <= now).sort((a, b) => a.due - b.due || a.phase - b.phase);
+    const newLeft = Math.max(0, settings.newPerDay - todayStats().nw);
+    const fresh = pool.filter(isNew).slice(0, newLeft);
+    return { review, fresh };
+}
+const troubleList = (pool) => pool
+    .filter((v) => v.bad >= 2 && v.streak < 3)
+    .sort((a, b) => b.bad - a.bad || a.streak - b.streak);
+
+function nextDueText(pool) {
+    const now = Date.now();
+    const future = pool.filter((v) => !isNew(v) && v.due > now).map((v) => v.due);
+    if (!future.length) return 'keine geplant';
+    const rel = relDay(Math.min(...future));
+    const n = future.filter((t) => relDay(t) === rel).length;
+    return `${rel} (${n} Vokabeln)`;
+}
+
+function schedule(item, correct) {
+    if (correct) {
+        if (item.phase < 6) { item.phase++; promoted++; }
+        item.due = dueTs(settings.intervals[item.phase - 1]);
+    } else {
+        const np = settings.onWrong === 'back' ? Math.max(1, item.phase - 1) : 1;
+        if (np < item.phase) demoted++;
+        item.phase = np;
+        item.due = Date.now();
+    }
+}
+
+/** Antwort verbuchen: Zähler, Serie, Tagesstatistik, bei der täglichen Übung auch die Phase */
+function recordAnswer(item, correct) {
+    const first = !sessionDone.has(item);
+    const wasNew = isNew(item);
+    if (correct) { item.ok++; item.streak++; } else { item.bad++; item.streak = 0; }
+    if (!first) return;                       // Wiederholungen derselben Vokabel ändern Phase und Statistik nicht
+    sessionDone.add(item);
+    answeredCount++;
+    if (!correct) mistakeCount++;
+    const t = touchToday();
+    t.n++;
+    if (correct) t.ok++;
+    if (wasNew) t.nw++;
+    if (sessionKind === 'daily') schedule(item, correct);
+}
+
+function questionMode(item) {
+    if (sessionKind === 'free') return mode;
+    const hasGap = !!gapInfo(item);
+    if (sessionKind === 'trouble') {
+        const opts = ['translate', 'reverse'];
+        if (hasGap) opts.push('gap');
+        return opts[Math.floor(Math.random() * opts.length)];
+    }
+    // tägliche Übung: Frageart nach Phase (leicht nach schwer)
+    if (item.phase <= 2) return 'reverse';
+    if (item.phase <= 4) return 'translate';
+    return hasGap ? 'gap' : 'translate';
+}
+
 /* ================= Üben-Ansicht ================= */
 function updateModeLabels() {
     const n = LANGS[currentLang].name;
     const labels = {
-        translate: `Deutsch ➔ ${n}`,
-        reverse: `${n} ➔ Deutsch`,
+        translate: `Deutsch → ${n}`,
+        reverse: `${n} → Deutsch`,
         gap: 'Lückentext (Beispielsatz, 3. Spalte)',
         both: 'Übersetzen + Lückentext nacheinander'
     };
@@ -1470,10 +1623,62 @@ function updateModeLabels() {
 function selectedItems() {
     return langPool().filter((v) => !deselected.has(groupKey(v)));
 }
+
+function renderPhaseBars(pool) {
+    const box = $('phase-bars');
+    box.replaceChildren();
+    const c = [0, 0, 0, 0, 0, 0];
+    pool.forEach((v) => { c[v.phase - 1]++; });
+    const max = Math.max(1, ...c);
+    c.forEach((n, i) => {
+        const row = document.createElement('div');
+        row.className = 'phase-row';
+        const label = document.createElement('span');
+        label.textContent = i === 5 ? 'Phase 6 (gelernt)' : `Phase ${i + 1}`;
+        const bar = document.createElement('span');
+        bar.className = 'phase-bar';
+        const fill = document.createElement('span');
+        fill.style.width = `${(n / max) * 100}%`;
+        bar.append(fill);
+        const cnt = document.createElement('span');
+        cnt.className = 'phase-count';
+        cnt.textContent = String(n);
+        row.append(label, bar, cnt);
+        box.append(row);
+    });
+}
+
+function renderToday() {
+    const pool = selectedItems();
+    const { review, fresh } = dueList(pool);
+    const list = [...review, ...fresh].slice(0, settings.dailyLimit);
+    const revN = list.filter((v) => !isNew(v)).length;
+    const newN = list.length - revN;
+    const t = todayStats();
+
+    $('today-summary').textContent = list.length
+        ? `${list.length} Vokabeln warten: ${revN} Wiederholungen und ${newN} neue.`
+        : `Heute ist nichts mehr fällig. Nächste Wiederholung: ${nextDueText(pool)}.`;
+    const bar = $('goal-bar');
+    bar.max = settings.dailyGoal;
+    bar.value = Math.min(t.n, settings.dailyGoal);
+    $('goal-text').textContent = `${t.n} von ${settings.dailyGoal} Abfragen heute${t.n ? `, davon ${t.ok} richtig` : ''}`;
+    const s = streakDays();
+    $('streak-text').textContent = `Serie: ${s} ${s === 1 ? 'Tag' : 'Tage'} in Folge`;
+    $('daily-btn').disabled = list.length === 0;
+
+    const trouble = troubleList(pool);
+    $('trouble-text').textContent = trouble.length
+        ? `${trouble.length} Vokabeln mit Schwierigkeiten (mindestens 2 Fehler, noch nicht 3-mal in Folge richtig).`
+        : 'Aktuell keine Problem-Vokabeln.';
+    $('trouble-btn').disabled = trouble.length === 0;
+}
+
 function updateSelCount() {
     const sel = selectedItems();
     const gapN = sel.filter((v) => gapInfo(v)).length;
-    $('sel-count').textContent = `${sel.length} von ${langPool().length} Vokabeln ausgewählt · ${gapN} mit Lückentext`;
+    $('sel-count').textContent = `${sel.length} von ${langPool().length} ausgewählt, ${gapN} mit Lückentext`;
+    renderToday();
 }
 function renderLearn() {
     const pool = langPool();
@@ -1499,7 +1704,28 @@ function renderLearn() {
         label.append(cb, txt);
         box.append(label);
     });
+    renderPhaseBars(pool);
     updateSelCount();
+}
+
+/* Einstellungen */
+function syncSettingsUI() {
+    settings.intervals.forEach((n, i) => { $(`iv-${i + 1}`).value = n; });
+    $('set-wrong').value = settings.onWrong;
+    $('set-new').value = settings.newPerDay;
+    $('set-limit').value = settings.dailyLimit;
+    $('set-goal').value = settings.dailyGoal;
+}
+function readSettingsUI() {
+    settings = sanitizeSettings({
+        intervals: [1, 2, 3, 4, 5, 6].map((i) => $(`iv-${i}`).value),
+        onWrong: $('set-wrong').value,
+        newPerDay: $('set-new').value,
+        dailyLimit: $('set-limit').value,
+        dailyGoal: $('set-goal').value
+    });
+    savePool();
+    renderToday();
 }
 
 /* ================= Listen-Ansicht ================= */
@@ -1563,6 +1789,15 @@ function deleteSection(prefix) {
     refreshAll();
 }
 
+function itemMeta(v) {
+    const parts = [`Phase ${v.phase}`];
+    if (isNew(v)) parts.push('neu');
+    else parts.push(v.due <= Date.now() ? 'fällig' : `fällig ${relDay(v.due)}`);
+    if (v.bad) parts.push(`${v.bad} ${v.bad === 1 ? 'Fehler' : 'Fehler'}`);
+    if (v.bad >= 2 && v.streak < 3) parts.push('Problem-Vokabel');
+    return parts.join(' · ');
+}
+
 function buildItemRow(v) {
     const row = document.createElement('div');
     row.className = 'item';
@@ -1579,17 +1814,21 @@ function buildItemRow(v) {
         s.textContent = displaySentence(v);
         main.append(s);
     }
+    const meta = document.createElement('div');
+    meta.className = 'item-meta';
+    meta.textContent = itemMeta(v);
+    main.append(meta);
     if (v.fix && v.fix.length) {
         const note = document.createElement('div');
         note.className = 'fix-note';
-        note.textContent = `✎ Automatisch korrigiert: ${v.fix.join(' · ')}`;
+        note.textContent = `Automatisch korrigiert: ${v.fix.join(' · ')}`;
         main.append(note);
     }
     const acts = document.createElement('div');
     acts.className = 'item-actions';
     acts.append(
-        iconButton('✎', `${v.term} bearbeiten`, () => row.replaceWith(buildEditor(v))),
-        iconButton('✕', `${v.term} löschen`, () => {
+        iconButton('Bearbeiten', `${v.term} bearbeiten`, () => row.replaceWith(buildEditor(v))),
+        iconButton('Löschen', `${v.term} löschen`, () => {
             vocabularyPool = vocabularyPool.filter((x) => x !== v);
             rebuildProtected();
             savePool();
@@ -1617,21 +1856,25 @@ function buildEditor(v) {
         form.append(wrap);
         return inp;
     };
-    const langWrap = document.createElement('label');
-    langWrap.className = 'field';
-    const langSp = document.createElement('span');
-    langSp.textContent = 'Sprache';
-    const langSel = document.createElement('select');
-    Object.entries(LANGS).forEach(([k, val]) => {
-        const o = document.createElement('option');
-        o.value = k;
-        o.textContent = val.name;
-        langSel.append(o);
-    });
-    langSel.value = v.lang;
-    langWrap.append(langSp, langSel);
-    form.append(langWrap);
+    const mkSelect = (label, entries, value) => {
+        const wrap = document.createElement('label');
+        wrap.className = 'field';
+        const sp = document.createElement('span');
+        sp.textContent = label;
+        const sel = document.createElement('select');
+        entries.forEach(([val, text]) => {
+            const o = document.createElement('option');
+            o.value = val;
+            o.textContent = text;
+            sel.append(o);
+        });
+        sel.value = value;
+        wrap.append(sp, sel);
+        form.append(wrap);
+        return sel;
+    };
 
+    const langSel = mkSelect('Sprache', Object.entries(LANGS).map(([k, val]) => [k, val.name]), v.lang);
     const iTerm = mk(`${LANGS[v.lang].name} (Stichwort)`, v.term);
     const iDe = mk('Deutsch', v.de);
     const iSent = mk('Beispielsatz (Lücke = _____)', v.sentence);
@@ -1639,6 +1882,7 @@ function buildEditor(v) {
     const p1 = mk('Bereich Ebene 1', v.path[0] || '', 'dl-1');
     const p2 = mk('Bereich Ebene 2', v.path[1] || '', 'dl-2');
     const p3 = mk('Bereich Ebene 3', v.path[2] || '', 'dl-3');
+    const phSel = mkSelect('Phase', [1, 2, 3, 4, 5, 6].map((n) => [String(n), `Phase ${n}`]), String(v.phase));
 
     const actions = document.createElement('div');
     actions.className = 'actions';
@@ -1667,6 +1911,11 @@ function buildEditor(v) {
         const ans = iGaps.value.split(';').map((s) => s.trim());
         v.gaps = Array.from({ length: cnt }, (_, i) => ({ n: v.gaps[i] ? v.gaps[i].n : null, a: ans[i] || '' }));
         v.path = [p1.value, p2.value, p3.value].map((s) => s.trim()).filter(Boolean);
+        const np = Number(phSel.value);
+        if (np !== v.phase) {
+            v.phase = np;
+            v.due = np === 1 ? 0 : dueTs(settings.intervals[np - 1]);
+        }
         v.fix = undefined;                                   // von Hand bestätigt
         addConfirmed(`${term} ${de} ${v.sentence}`);
         rebuildProtected();
@@ -1710,8 +1959,8 @@ function renderNode(node, prefix, openAll) {
         const acts = document.createElement('span');
         acts.className = 'sec-actions';
         acts.append(
-            iconButton('✎', `„${child.name}“ umbenennen`, () => renameSection(path)),
-            iconButton('🗑', `„${child.name}“ löschen`, () => deleteSection(path))
+            iconButton('Umbenennen', `„${child.name}“ umbenennen`, () => renameSection(path)),
+            iconButton('Löschen', `„${child.name}“ löschen`, () => deleteSection(path))
         );
         frag.append(makeSection(child.name, path.join(' › '), countItems(child), (body) => body.append(renderNode(child, path, openAll)), acts));
     });
@@ -1730,26 +1979,34 @@ function renderLists() {
     tree.replaceChildren();
     const empty = $('list-empty');
     empty.hidden = items.length > 0;
-    empty.textContent = all.length ? 'Keine Treffer.' : `Noch keine ${LANGS[currentLang].name}en Vokabeln. Füge sie im Tab „Hinzufügen“ hinzu.`.replace('Englischen', 'englischen').replace('Französischen', 'französischen');
+    empty.textContent = all.length ? 'Keine Treffer.' : `Noch keine ${LANGS[currentLang].adj} Vokabeln. Füge sie im Tab „Hinzufügen“ hinzu.`;
     tree.append(renderNode(buildTree(items), [], !!q));
     updateAddLabels();
 }
 
 /* ================= Trainer ================= */
-function startSession() {
+function resetCounters() {
+    sessionDone = new Set();
+    mistakeCount = 0;
+    answeredCount = 0;
+    promoted = 0;
+    demoted = 0;
+}
+
+function startFree() {
     sessionPool = selectedItems();
     if (!sessionPool.length) { setStatus('Bitte mindestens einen Bereich auswählen.', 'error'); return; }
     const sel = $('mode-select').value;
     roundQueue = sel === 'both' ? ['translate', 'gap'] : [sel];
     if (roundQueue.includes('gap') && !sessionPool.some((v) => gapInfo(v))) {
         if (sel === 'gap') {
-            setStatus('❌ In den gewählten Bereichen gibt es keine Lückentexte (Satz mit Lücke und bekannter Lösung). Ergänze Lösungen unter „Listen“ oder wähle einen anderen Modus.', 'error');
+            setStatus('In den gewählten Bereichen gibt es keine Lückentexte (Satz mit Lücke und bekannter Lösung). Ergänze Lösungen unter „Listen“ oder wähle einen anderen Modus.', 'error');
             return;
         }
         roundQueue = ['translate'];
     }
-    mistakeCount = 0;
-    answeredCount = 0;
+    sessionKind = 'free';
+    resetCounters();
     setStatus('');
     nextRound('');
 }
@@ -1770,13 +2027,63 @@ function nextRound(notice) {
     finish();
 }
 
+function beginSession(kind, list) {
+    sessionKind = kind;
+    sessionPool = list;
+    activeList = shuffle([...list]);
+    wrongAnswers = [];
+    roundQueue = [];
+    currentIndex = 0;
+    isRetry = false;
+    resetCounters();
+    setStatus('');
+    showScreen('trainer');
+    showQuestion('');
+}
+
+/** Gibt false zurück, wenn nichts zu üben ist (Meldung steht dann in der Übersicht) */
+function startDaily() {
+    const { review, fresh } = dueList(selectedItems());
+    const list = [...review, ...fresh].slice(0, settings.dailyLimit);
+    if (!list.length) {
+        backToMain();
+        setStatus(`Heute ist nichts mehr fällig. Nächste Wiederholung: ${nextDueText(selectedItems())}.`, 'ok');
+        return false;
+    }
+    beginSession('daily', list);
+    return true;
+}
+function startTrouble() {
+    const list = troubleList(selectedItems()).slice(0, 20);
+    if (!list.length) {
+        backToMain();
+        setStatus('Keine Problem-Vokabeln vorhanden.', 'ok');
+        return false;
+    }
+    beginSession('trouble', list);
+    return true;
+}
+function restartSession() {
+    if (sessionKind === 'daily') startDaily();
+    else if (sessionKind === 'trouble') startTrouble();
+    else startFree();
+}
+
+function phaseTitle(item) {
+    const n = LANGS[currentLang].name;
+    const titles = { translate: `Deutsch → ${n}`, reverse: `${n} → Deutsch`, gap: 'Lückentext' };
+    const retry = isRetry ? ', Wiederholung' : '';
+    if (sessionKind === 'daily') return `Tägliche Übung, Phase ${item.phase}${retry}`;
+    if (sessionKind === 'trouble') return `Problem-Vokabeln${retry}`;
+    return `${titles[qMode]}${retry}`;
+}
+
 function showQuestion(notice = '') {
     isShowingResolution = false;
     const item = activeList[currentIndex];
     const input = $('user-input');
     const sentenceBox = $('sentence-box');
-    const n = LANGS[currentLang].name;
-    const titles = { translate: `Deutsch ➔ ${n}`, reverse: `${n} ➔ Deutsch`, gap: 'Lückentext' };
+    qMode = questionMode(item);
 
     input.value = '';
     input.readOnly = false;
@@ -1784,13 +2091,13 @@ function showQuestion(notice = '') {
     $('feedback-display').textContent = notice;
     $('action-btn').textContent = 'Antwort prüfen';
     $('stats-display').textContent = `Vokabel ${currentIndex + 1} von ${activeList.length}`;
-    $('phase-title').textContent = (isRetry ? 'Fehler-Wiederholung: ' : '') + titles[mode];
+    $('phase-title').textContent = phaseTitle(item);
     sentenceBox.hidden = true;
 
-    if (mode === 'translate') {
+    if (qMode === 'translate') {
         $('question-display').textContent = item.de;
-        input.placeholder = `${n}e Übersetzung...`.replace('Französische', 'Französische').replace('Englische', 'Englische');
-    } else if (mode === 'reverse') {
+        input.placeholder = currentLang === 'fr' ? 'Französische Übersetzung...' : 'Englische Übersetzung...';
+    } else if (qMode === 'reverse') {
         $('question-display').textContent = item.term;
         input.placeholder = 'Deutsche Übersetzung...';
     } else {
@@ -1813,10 +2120,10 @@ function checkAnswer() {
     let result;
     let solution = item.term;
 
-    if (mode === 'reverse') {
+    if (qMode === 'reverse') {
         result = judgeDe(value, item);
         solution = item.de;
-    } else if (mode === 'gap') {
+    } else if (qMode === 'gap') {
         const info = gapInfo(item);
         result = judgeGap(value, info);
         if (!result && item.lang === 'en') result = judgeTerm(value, item);
@@ -1825,18 +2132,15 @@ function checkAnswer() {
         result = judgeTerm(value, item);
     }
 
-    answeredCount++;
+    recordAnswer(item, !!result);
     if (result) {
-        item.ok++;
         feedback.className = 'feedback correct';
-        if (result === 'typo') feedback.textContent = `Richtig (kleiner Tippfehler) 🎉 Schreibweise: ${solution}`;
-        else if (result === 'accent') feedback.textContent = `Richtig, aber achte auf die Akzente: ${solution} 🎉`;
-        else feedback.textContent = 'Richtig! 🎉';
+        if (result === 'typo') feedback.textContent = `Richtig (kleiner Tippfehler). Schreibweise: ${solution}`;
+        else if (result === 'accent') feedback.textContent = `Richtig, aber achte auf die Akzente: ${solution}`;
+        else feedback.textContent = 'Richtig!';
     } else {
-        item.bad++;
-        mistakeCount++;
         feedback.className = 'feedback wrong';
-        feedback.textContent = `Falsch ❌ Lösung: ${solution}`;
+        feedback.textContent = `Falsch. Lösung: ${solution}`;
         if (!wrongAnswers.includes(item)) wrongAnswers.push(item);
     }
     savePool();
@@ -1865,7 +2169,13 @@ function advance() {
 }
 
 function finish() {
-    $('end-text').textContent = `${answeredCount} Antworten, davon ${mistakeCount} Fehler. Du bist bereit für den Test! 🎉`;
+    let text = `${answeredCount} Vokabeln abgefragt, ${answeredCount - mistakeCount} davon beim ersten Mal richtig.`;
+    if (sessionKind === 'daily') {
+        text += ` ${promoted} in eine höhere Phase, ${demoted} zurückgestuft. Nächste Wiederholung: ${nextDueText(langPool())}.`;
+    }
+    const s = streakDays();
+    if (s > 0) text += ` Serie: ${s} ${s === 1 ? 'Tag' : 'Tage'}.`;
+    $('end-text').textContent = text;
     showScreen('end');
     $('restart-btn').focus();
 }
@@ -1879,6 +2189,85 @@ let installPrompt = null;
 const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+function imageSize(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve([img.naturalWidth, img.naturalHeight]);
+        img.onerror = reject;
+        img.src = `${url}${url.includes('?') ? '&' : '?'}check=${Date.now()}`;
+    });
+}
+
+/** Zeigt an, welche Voraussetzung für die Installation fehlt */
+async function diagnosePwa() {
+    const list = $('install-report');
+    const rows = [];
+    const ok = (t) => rows.push(`OK: ${t}`);
+    const bad = (t) => rows.push(`Fehler: ${t}`);
+    list.hidden = false;
+    list.replaceChildren();
+    const li = document.createElement('li');
+    li.textContent = 'Prüfe...';
+    list.append(li);
+
+    (window.isSecureContext ? ok : bad)('Sichere Verbindung (https)');
+
+    const link = document.querySelector('link[rel="manifest"]');
+    if (!link) {
+        bad('In der index.html fehlt <link rel="manifest" href="manifest.json">.');
+    } else {
+        try {
+            const res = await fetch(link.href, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const m = await res.json();
+            ok('manifest.json gefunden und lesbar');
+            (m.display === 'standalone' || m.display === 'fullscreen' || m.display === 'minimal-ui' ? ok : bad)(`display = ${m.display || 'nicht gesetzt'}`);
+            (m.name || m.short_name ? ok : bad)('Name im Manifest');
+            let has192 = false;
+            let has512 = false;
+            for (const icon of m.icons || []) {
+                const url = new URL(icon.src, link.href).href;
+                try {
+                    const [w, h] = await imageSize(url);
+                    ok(`${icon.src} geladen (${w}x${h})`);
+                    if (w >= 192 && h >= 192) has192 = true;
+                    if (w >= 512 && h >= 512) has512 = true;
+                } catch (e) {
+                    bad(`${icon.src} lässt sich nicht laden (Datei fehlt oder ist kein Bild)`);
+                }
+            }
+            if (!has192) bad('Kein gültiges Icon mit mindestens 192x192 Pixeln.');
+            if (!has512) bad('Kein gültiges Icon mit mindestens 512x512 Pixeln.');
+        } catch (e) {
+            bad(`manifest.json lässt sich nicht laden (${e.message})`);
+        }
+    }
+
+    if (!('serviceWorker' in navigator)) {
+        bad('Dieser Browser unterstützt keinen Service Worker.');
+    } else {
+        try {
+            const reg = await navigator.serviceWorker.getRegistration();
+            if (!reg) bad('Service Worker ist nicht registriert (liegt sw.js neben der index.html?).');
+            else if (reg.active) ok('Service Worker aktiv');
+            else bad('Service Worker ist registriert, aber noch nicht aktiv. Seite neu laden.');
+        } catch (e) {
+            bad('Service Worker konnte nicht geprüft werden.');
+        }
+    }
+
+    (installPrompt ? ok : bad)(installPrompt
+        ? 'Der Browser bietet die Installation an'
+        : 'Der Browser hat die Installation noch nicht angeboten (nur Chrome und Edge; bei Safari über Teilen, Zum Home-Bildschirm)');
+
+    list.replaceChildren();
+    rows.forEach((t) => {
+        const item = document.createElement('li');
+        item.textContent = t;
+        list.append(item);
+    });
+}
+
 function setupPwa() {
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
@@ -1888,17 +2277,21 @@ function setupPwa() {
     const DISMISS_KEY = 'vokabeltrainer.installDismissed';
     const bar = $('install-bar');
     const btn = $('install-btn');
-    const hint = $('ios-hint');
+    const info = $('install-info');
     let dismissed = false;
     try { dismissed = localStorage.getItem(DISMISS_KEY) === '1'; } catch (e) { /* egal */ }
     if (isStandalone() || dismissed) return;
 
+    info.textContent = isIos()
+        ? 'iPhone/iPad: In Safari auf Teilen tippen, dann „Zum Home-Bildschirm“.'
+        : 'Wenn kein Button erscheint: Browser-Menü öffnen und „App installieren“ bzw. „Zum Startbildschirm hinzufügen“ wählen.';
+    bar.hidden = false;
+
     window.addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
         installPrompt = e;
-        hint.hidden = true;
         btn.hidden = false;
-        bar.hidden = false;
+        info.textContent = 'Diese App lässt sich auf dem Gerät installieren.';
     });
     window.addEventListener('appinstalled', () => { installPrompt = null; bar.hidden = true; });
     btn.addEventListener('click', async () => {
@@ -1908,17 +2301,17 @@ function setupPwa() {
         installPrompt = null;
         bar.hidden = true;
     });
+    $('install-check').addEventListener('click', diagnosePwa);
     $('install-dismiss').addEventListener('click', () => {
         bar.hidden = true;
         try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) { /* egal */ }
     });
-    if (isIos()) { btn.hidden = true; hint.hidden = false; bar.hidden = false; }
 }
 
 /* ================= Init ================= */
 function init() {
     window.addEventListener('error', (ev) => {
-        const msg = `❌ Skriptfehler: ${ev.message}`;
+        const msg = `Skriptfehler: ${ev.message}`;
         if (!$('main-screen').hidden) setStatus(msg, 'error');
         else { const el = $('login-msg'); el.textContent = msg; el.hidden = false; }
     });
@@ -1934,6 +2327,8 @@ function init() {
     document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
     // Üben
+    $('daily-btn').addEventListener('click', startDaily);
+    $('trouble-btn').addEventListener('click', startTrouble);
     $('sel-all').addEventListener('click', () => { deselected.clear(); renderLearn(); });
     $('sel-none').addEventListener('click', () => {
         langPool().forEach((v) => deselected.add(groupKey(v)));
@@ -1942,7 +2337,17 @@ function init() {
     const sel = $('mode-select');
     try { const m = localStorage.getItem(MODE_KEY); if (m && [...sel.options].some((o) => o.value === m)) sel.value = m; } catch (e) { /* egal */ }
     sel.addEventListener('change', () => { try { localStorage.setItem(MODE_KEY, sel.value); } catch (e) { /* egal */ } });
-    $('start-btn').addEventListener('click', startSession);
+    $('start-btn').addEventListener('click', startFree);
+
+    // Einstellungen
+    ['iv-1', 'iv-2', 'iv-3', 'iv-4', 'iv-5', 'iv-6', 'set-wrong', 'set-new', 'set-limit', 'set-goal']
+        .forEach((id) => $(id).addEventListener('change', readSettingsUI));
+    $('settings-reset').addEventListener('click', () => {
+        settings = sanitizeSettings(DEFAULT_SETTINGS);
+        syncSettingsUI();
+        savePool();
+        renderToday();
+    });
 
     // Listen
     let searchTimer = null;
@@ -2018,7 +2423,7 @@ function init() {
             path: readPathFields().filter(Boolean)
         }, currentLang);
         if (!item) return;
-        if (vocabularyPool.some((v) => sameVocab(v, item))) { setStatus('ℹ️ Diese Vokabel gibt es schon.', 'busy'); return; }
+        if (vocabularyPool.some((v) => sameVocab(v, item))) { setStatus('Diese Vokabel gibt es schon.', 'busy'); return; }
         vocabularyPool.push(item);
         addConfirmed(`${term} ${de} ${sentence}`);
         rebuildProtected();
@@ -2026,7 +2431,7 @@ function init() {
         refreshAll();
         $('manual-form').reset();
         $('m-term').focus();
-        setStatus(`✅ „${term}“ hinzugefügt.`, 'ok');
+        setStatus(`„${term}“ hinzugefügt.`, 'ok');
     });
 
     // Trainer
@@ -2035,7 +2440,7 @@ function init() {
         if (e.key === 'Enter') { e.preventDefault(); checkAnswer(); }
     });
     $('quit-btn').addEventListener('click', backToMain);
-    $('restart-btn').addEventListener('click', startSession);
+    $('restart-btn').addEventListener('click', restartSession);
     $('back-btn').addEventListener('click', backToMain);
 
     // Beim Zurückkehren in den Tab Änderungen anderer Geräte holen, beim Verlassen speichern

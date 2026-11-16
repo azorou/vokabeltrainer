@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#3498db">
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" href="icons/icon-192.png">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Vokabeltrainer">
@@ -25,14 +25,16 @@
         .container { background: #fff; padding: 24px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.08); max-width: 920px; margin: 0 auto; }
         h1 { color: var(--ink); font-size: 26px; margin: 0 0 8px; }
         h2 { color: var(--ink); font-size: 20px; margin: 4px 0 12px; }
+        h3 { color: var(--ink); font-size: 16px; margin: 0 0 8px; }
         .lead { color: var(--muted); margin: 0 0 18px; }
         .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; }
+        .inline-hint { font-weight: normal; font-size: 12px; color: var(--muted); margin-left: 6px; }
         #login-screen, #trainer-screen, #end-screen { text-align: center; max-width: 560px; margin: 0 auto; }
 
         /* Buttons */
         button { font-family: inherit; background: #2ecc71; color: #fff; border: none; padding: 12px 22px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(46,204,113,.2); transition: all .2s; }
         button:hover { background: #27ae60; transform: translateY(-1px); }
-        button:disabled { opacity: .6; cursor: default; transform: none; }
+        button:disabled { opacity: .55; cursor: default; transform: none; }
         button.block { display: block; width: 100%; margin-top: 14px; }
         button.nav-btn { background: var(--blue); box-shadow: 0 4px 6px rgba(52,152,219,.2); }
         button.nav-btn:hover { background: var(--blue-d); }
@@ -43,13 +45,13 @@
         button.mini { padding: 6px 12px; font-size: 13px; }
         button.link-btn { background: none; color: #2980b9; box-shadow: none; text-decoration: underline; font-weight: normal; padding: 8px; }
         button.link-btn:hover { background: none; transform: none; color: #1c5d8a; }
-        button.icon-btn { background: #eef2f7; color: var(--ink); box-shadow: none; padding: 4px 9px; font-size: 14px; font-weight: normal; }
+        button.icon-btn { background: #eef2f7; color: var(--ink); box-shadow: none; padding: 4px 10px; font-size: 13px; font-weight: normal; }
         button.icon-btn:hover { background: #dde5ee; transform: none; }
 
         /* Formulare */
         .field { display: block; text-align: left; margin: 10px 0; }
         .field > span { display: block; font-size: 13px; color: #4a5568; margin-bottom: 4px; }
-        select, input[type="text"], input[type="password"], input[type="search"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
+        select, input[type="text"], input[type="password"], input[type="search"], input[type="number"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
         select:focus, input:focus { border-color: var(--blue); }
         #user-input { max-width: 420px; font-size: 20px; text-align: center; }
         .check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #4a5568; margin: 10px 0; }
@@ -60,6 +62,7 @@
         legend { font-weight: bold; color: var(--ink); padding: 0 6px; font-size: 14px; }
         .inline-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
         .path-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .iv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
 
         /* Kopf, Sprache, Tabs */
@@ -76,21 +79,28 @@
         button.tab { flex: 1; background: none; color: var(--muted); box-shadow: none; padding: 12px 8px; border-radius: 8px 8px 0 0; border-bottom: 3px solid transparent; font-size: 15px; }
         button.tab:hover { background: #f4f8fc; transform: none; }
         button.tab[aria-selected="true"] { color: var(--blue-d); border-bottom-color: var(--blue); }
-        .tab .ico { display: none; }
 
         .status { font-weight: bold; margin: 0 0 14px; font-size: 15px; line-height: 1.4; }
         .conflict-box { background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 12px 15px; margin: 0 0 15px; text-align: left; }
+
+        /* Üben */
+        .today, .panel { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 0 0 14px; background: #f9fbfd; text-align: left; }
+        .today { border-color: #bcdcf5; background: #eaf4fd; }
+        .today p, .panel p { margin: 0 0 6px; }
+        progress { width: 100%; height: 14px; margin-top: 4px; }
+        .phase-row { display: grid; grid-template-columns: 130px 1fr 36px; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
+        .phase-bar { display: block; height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
+        .phase-bar > span { display: block; height: 100%; background: var(--blue); }
+        .phase-count { text-align: right; }
+        #group-list { max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
+        details.manual { background: #f8f9fa; border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; margin: 0 0 14px; text-align: left; }
+        details.manual summary { cursor: pointer; font-weight: bold; color: var(--ink); }
 
         /* Hinzufügen */
         .upload-zone { display: block; border: 3px dashed var(--blue); padding: 26px 20px; border-radius: 12px; background: #f9fbfd; cursor: pointer; margin-bottom: 12px; text-align: center; transition: all .3s; }
         .upload-zone:hover { background: #ecf5fc; border-color: var(--blue-d); }
         .preview-container { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
         .preview-img { max-width: 80px; max-height: 80px; border-radius: 4px; border: 1px solid #cbd5e1; }
-        details.manual { background: #f8f9fa; border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; margin: 16px 0; }
-        details.manual summary { cursor: pointer; font-weight: bold; color: var(--ink); }
-
-        /* Üben */
-        #group-list { max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
 
         /* Listen */
         #list-tree { margin-top: 8px; }
@@ -102,6 +112,7 @@
         .item { display: flex; justify-content: space-between; gap: 8px; padding: 8px 6px; border-top: 1px solid #edf2f7; text-align: left; }
         .item-main { min-width: 0; overflow-wrap: anywhere; }
         .item-sent { font-size: 13px; font-style: italic; color: #4a5568; margin-top: 2px; }
+        .item-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
         .item-actions { display: flex; gap: 6px; align-items: flex-start; flex: none; }
         .fix-note { font-size: 12px; color: #9a6700; background: #fff8e1; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
         .editor { border: 2px solid var(--blue); border-radius: 8px; padding: 10px 12px; margin: 6px 0; background: #f9fbfd; text-align: left; }
@@ -128,8 +139,10 @@
         .cam-bar button { padding: 10px 16px; font-size: 15px; }
 
         /* PWA-Installation */
-        .install-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; background: #eaf4fd; border: 1px solid #bcdcf5; border-radius: 8px; padding: 10px 12px; margin-bottom: 15px; font-size: 13px; color: var(--ink); }
-        .ios-hint { margin: 0; text-align: left; flex: 1 1 220px; }
+        .install-bar { background: #eaf4fd; border: 1px solid #bcdcf5; border-radius: 8px; padding: 10px 12px; margin-bottom: 15px; font-size: 13px; color: var(--ink); }
+        .install-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+        .install-info { margin: 0; text-align: left; flex: 1 1 240px; }
+        .install-report { text-align: left; margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
 
         /* Mobil */
         @media (max-width: 700px) {
@@ -138,10 +151,11 @@
             .lang-switch { width: 100%; order: 3; }
             .lang-switch button { flex: 1; }
             .tabbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; background: #fff; border-top: 1px solid var(--line); border-bottom: none; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); z-index: 20; }
-            button.tab { border-bottom: none; border-top: 3px solid transparent; border-radius: 0; padding: 8px 4px 10px; font-size: 13px; }
+            button.tab { border-bottom: none; border-top: 3px solid transparent; border-radius: 0; padding: 14px 4px 16px; font-size: 14px; }
             button.tab[aria-selected="true"] { border-top-color: var(--blue); }
-            .tab .ico { display: block; font-size: 20px; }
             .path-grid { grid-template-columns: 1fr; }
+            .iv-grid { grid-template-columns: repeat(2, 1fr); }
+            .phase-row { grid-template-columns: 110px 1fr 30px; }
             .word-display { font-size: 27px; }
         }
 
@@ -159,9 +173,13 @@
 <div class="container">
 
     <div id="install-bar" class="install-bar" hidden>
-        <button type="button" id="install-btn" class="nav-btn mini" hidden>📲 App installieren</button>
-        <p id="ios-hint" class="ios-hint" hidden>Auf iPhone/iPad: In <strong>Safari</strong> auf <strong>Teilen</strong> (⎙) tippen, dann <strong>„Zum Home-Bildschirm“</strong>.</p>
-        <button type="button" id="install-dismiss" class="link-btn">Schließen</button>
+        <div class="install-row">
+            <button type="button" id="install-btn" class="nav-btn mini" hidden>App installieren</button>
+            <p id="install-info" class="install-info"></p>
+            <button type="button" id="install-check" class="mini secondary">Installation prüfen</button>
+            <button type="button" id="install-dismiss" class="link-btn">Schließen</button>
+        </div>
+        <ul id="install-report" class="install-report" hidden></ul>
     </div>
 
     <!-- LOGIN -->
@@ -199,9 +217,9 @@
         </header>
 
         <nav class="tabbar" role="tablist" aria-label="Bereiche">
-            <button type="button" role="tab" class="tab" id="tab-learn" data-tab="learn" aria-controls="view-learn" aria-selected="true"><span class="ico" aria-hidden="true">🎯</span>Üben</button>
-            <button type="button" role="tab" class="tab" id="tab-lists" data-tab="lists" aria-controls="view-lists" aria-selected="false"><span class="ico" aria-hidden="true">📚</span>Listen</button>
-            <button type="button" role="tab" class="tab" id="tab-add" data-tab="add" aria-controls="view-add" aria-selected="false"><span class="ico" aria-hidden="true">➕</span>Hinzufügen</button>
+            <button type="button" role="tab" class="tab" id="tab-learn" data-tab="learn" aria-controls="view-learn" aria-selected="true">Üben</button>
+            <button type="button" role="tab" class="tab" id="tab-lists" data-tab="lists" aria-controls="view-lists" aria-selected="false">Listen</button>
+            <button type="button" role="tab" class="tab" id="tab-add" data-tab="add" aria-controls="view-add" aria-selected="false">Hinzufügen</button>
         </nav>
 
         <div id="conflict-box" class="conflict-box" role="alertdialog" aria-labelledby="conflict-title" tabindex="-1" hidden>
@@ -219,24 +237,72 @@
             <h2>Üben</h2>
             <p id="learn-empty" class="lead" hidden>Noch keine Vokabeln in dieser Sprache. Füge im Tab „Hinzufügen“ Screenshots oder Fotos hinzu.</p>
             <div id="learn-body">
-                <fieldset>
-                    <legend>Bereiche zum Üben</legend>
-                    <div class="inline-tools">
+
+                <section class="today" aria-labelledby="today-title">
+                    <h3 id="today-title">Heute</h3>
+                    <p id="today-summary"></p>
+                    <label for="goal-bar" class="hint">Tagesziel</label>
+                    <progress id="goal-bar" value="0" max="20"></progress>
+                    <span id="goal-text" class="hint"></span>
+                    <span id="streak-text" class="hint"></span>
+                    <button type="button" id="daily-btn" class="block nav-btn">Tägliche Übung starten</button>
+                </section>
+
+                <section class="panel" aria-labelledby="phases-title">
+                    <h3 id="phases-title">Phasen</h3>
+                    <div id="phase-bars"></div>
+                </section>
+
+                <section class="panel" aria-labelledby="trouble-title">
+                    <h3 id="trouble-title">Problem-Vokabeln</h3>
+                    <p id="trouble-text"></p>
+                    <button type="button" id="trouble-btn" class="block secondary">Problem-Vokabeln trainieren</button>
+                </section>
+
+                <details class="manual" id="area-box">
+                    <summary>Bereiche auswählen <span id="sel-count" class="inline-hint"></span></summary>
+                    <div class="inline-tools" style="margin-top:10px;">
                         <button type="button" id="sel-all" class="mini secondary">Alle</button>
                         <button type="button" id="sel-none" class="mini secondary">Keine</button>
-                        <span id="sel-count" class="hint" style="margin:0;"></span>
                     </div>
                     <div id="group-list"></div>
-                </fieldset>
-                <label class="field" for="mode-select"><span>Abfrage-Modus</span>
-                    <select id="mode-select">
-                        <option value="translate"></option>
-                        <option value="reverse"></option>
-                        <option value="gap"></option>
-                        <option value="both"></option>
-                    </select>
-                </label>
-                <button type="button" id="start-btn" class="block nav-btn">Abfrage starten 🚀</button>
+                </details>
+
+                <section class="panel" aria-labelledby="free-title">
+                    <h3 id="free-title">Freies Üben</h3>
+                    <label class="field" for="mode-select"><span>Abfrage-Modus (ändert die Phasen nicht)</span>
+                        <select id="mode-select">
+                            <option value="translate"></option>
+                            <option value="reverse"></option>
+                            <option value="gap"></option>
+                            <option value="both"></option>
+                        </select>
+                    </label>
+                    <button type="button" id="start-btn" class="block nav-btn">Freies Üben starten</button>
+                </section>
+
+                <details class="manual" id="settings-box">
+                    <summary>Einstellungen (Phasen und Tagesziel)</summary>
+                    <span class="hint">Abstand in Tagen, bis eine Vokabel in der jeweiligen Phase wieder abgefragt wird (0 = sofort).</span>
+                    <div class="iv-grid">
+                        <label class="field"><span>Phase 1</span><input type="number" id="iv-1" min="0" max="365" inputmode="numeric"></label>
+                        <label class="field"><span>Phase 2</span><input type="number" id="iv-2" min="0" max="365" inputmode="numeric"></label>
+                        <label class="field"><span>Phase 3</span><input type="number" id="iv-3" min="0" max="365" inputmode="numeric"></label>
+                        <label class="field"><span>Phase 4</span><input type="number" id="iv-4" min="0" max="365" inputmode="numeric"></label>
+                        <label class="field"><span>Phase 5</span><input type="number" id="iv-5" min="0" max="365" inputmode="numeric"></label>
+                        <label class="field"><span>Phase 6</span><input type="number" id="iv-6" min="0" max="365" inputmode="numeric"></label>
+                    </div>
+                    <label class="field"><span>Bei einem Fehler</span>
+                        <select id="set-wrong">
+                            <option value="reset">Zurück in Phase 1</option>
+                            <option value="back">Nur eine Phase zurück</option>
+                        </select>
+                    </label>
+                    <label class="field"><span>Neue Vokabeln pro Tag</span><input type="number" id="set-new" min="0" max="200" inputmode="numeric"></label>
+                    <label class="field"><span>Höchstzahl pro täglicher Übung</span><input type="number" id="set-limit" min="1" max="500" inputmode="numeric"></label>
+                    <label class="field"><span>Tagesziel (Abfragen pro Tag)</span><input type="number" id="set-goal" min="1" max="500" inputmode="numeric"></label>
+                    <button type="button" id="settings-reset" class="mini secondary">Standardwerte</button>
+                </details>
             </div>
         </div>
 
@@ -244,7 +310,7 @@
         <div id="view-lists" role="tabpanel" aria-labelledby="tab-lists" hidden>
             <h2>Listen</h2>
             <label class="field"><span class="sr-only">Suchen</span>
-                <input type="search" id="list-search" placeholder="Suchen (Wort, Übersetzung, Satz)…" autocomplete="off">
+                <input type="search" id="list-search" placeholder="Suchen (Wort, Übersetzung, Satz)..." autocomplete="off">
             </label>
             <div class="inline-tools">
                 <button type="button" id="expand-btn" class="mini secondary">Alle öffnen</button>
@@ -253,9 +319,9 @@
             <p id="list-empty" class="lead" hidden></p>
             <div id="list-tree"></div>
             <div class="tools">
-                <button type="button" id="export-btn" class="secondary">⬇ Sicherung speichern</button>
-                <button type="button" id="import-btn" class="secondary">⬆ Sicherung laden</button>
-                <button type="button" id="clear-btn" class="danger" hidden>🗑 Liste leeren</button>
+                <button type="button" id="export-btn" class="secondary">Sicherung speichern</button>
+                <button type="button" id="import-btn" class="secondary">Sicherung laden</button>
+                <button type="button" id="clear-btn" class="danger" hidden>Liste leeren</button>
             </div>
             <input type="file" id="import-input" class="sr-only" accept="application/json,.json">
         </div>
@@ -265,7 +331,7 @@
             <h2>Hinzufügen</h2>
             <fieldset>
                 <legend>Bereich für neue Vokabeln</legend>
-                <span class="hint" style="margin:0 0 8px;">Leer lassen = automatisch aus Seitenköpfen und Überschriften (Unité, Volet, Module, Unit, Texts …). Wenn du etwas einträgst, startet der Import in diesem Bereich.</span>
+                <span class="hint" style="margin:0 0 8px;">Leer lassen = automatisch aus Seitenköpfen und Überschriften (Unité, Volet, Module, Unit, Texts ...). Wenn du etwas einträgst, startet der Import in diesem Bereich.</span>
                 <div class="path-grid">
                     <label class="field"><span>Ebene 1 (z. B. Unité 1)</span><input type="text" id="path-1" list="dl-1" autocomplete="off"></label>
                     <label class="field"><span>Ebene 2 (z. B. Volet 2)</span><input type="text" id="path-2" list="dl-2" autocomplete="off"></label>
@@ -280,12 +346,12 @@
                 <span class="preview-container" id="preview-box"></span>
             </label>
             <input type="file" id="file-input" class="sr-only" accept="image/*" multiple>
-            <button type="button" id="camera-btn" class="block nav-btn">📷 Seiten mit der Kamera aufnehmen</button>
+            <button type="button" id="camera-btn" class="block nav-btn">Seiten mit der Kamera aufnehmen</button>
             <input type="file" id="cam-input" class="sr-only" accept="image/*" capture="environment">
             <label class="check"><input type="checkbox" id="autofix" checked> Automatische Korrektur (Wörterbuch &amp; Kontext)</label>
 
-            <details class="manual">
-                <summary>✍ Vokabel manuell hinzufügen</summary>
+            <details class="manual" style="margin-top:16px;">
+                <summary>Vokabel manuell hinzufügen</summary>
                 <form id="manual-form">
                     <label class="field"><span id="m-term-label">Französisch</span><input type="text" id="m-term" autocomplete="off" required></label>
                     <label class="field"><span>Deutsch</span><input type="text" id="m-de" autocomplete="off" required></label>
@@ -312,9 +378,9 @@
 
     <!-- ENDE -->
     <section id="end-screen" hidden>
-        <h1>🎓 Geschafft!</h1>
+        <h1>Geschafft</h1>
         <p id="end-text"></p>
-        <button type="button" id="restart-btn" class="block nav-btn">Nochmal üben</button>
+        <button type="button" id="restart-btn" class="block nav-btn">Nochmal</button>
         <button type="button" id="back-btn" class="block secondary">Zurück zur Übersicht</button>
     </section>
 </div>
@@ -324,7 +390,7 @@
     <video id="camera-video" autoplay playsinline muted></video>
     <div class="cam-bar">
         <span id="cam-count" role="status" aria-live="polite">0 Fotos</span>
-        <button type="button" id="cam-shot">📸 Aufnehmen</button>
+        <button type="button" id="cam-shot">Aufnehmen</button>
         <button type="button" id="cam-done" class="nav-btn">Fertig, scannen</button>
         <button type="button" id="cam-cancel" class="secondary">Abbrechen</button>
     </div>
