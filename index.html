@@ -51,7 +51,7 @@
         /* Formulare */
         .field { display: block; text-align: left; margin: 10px 0; }
         .field > span { display: block; font-size: 13px; color: #4a5568; margin-bottom: 4px; }
-        select, input[type="text"], input[type="password"], input[type="search"], input[type="number"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
+        select, input[type="text"], input[type="password"], input[type="search"], input[type="number"], input[type="time"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
         select:focus, input:focus { border-color: var(--blue); }
         #user-input { max-width: 420px; font-size: 20px; text-align: center; }
         .check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #4a5568; margin: 10px 0; }
@@ -282,7 +282,7 @@
                 </section>
 
                 <details class="manual" id="settings-box">
-                    <summary>Einstellungen (Phasen und Tagesziel)</summary>
+                    <summary>Einstellungen (Phasen, Tagesziel, Erinnerung)</summary>
                     <span class="hint">Abstand in Tagen, bis eine Vokabel in der jeweiligen Phase wieder abgefragt wird (0 = sofort).</span>
                     <div class="iv-grid">
                         <label class="field"><span>Phase 1</span><input type="number" id="iv-1" min="0" max="365" inputmode="numeric"></label>
@@ -298,10 +298,14 @@
                             <option value="back">Nur eine Phase zurück</option>
                         </select>
                     </label>
-                    <label class="field"><span>Neue Vokabeln pro Tag</span><input type="number" id="set-new" min="0" max="200" inputmode="numeric"></label>
-                    <label class="field"><span>Höchstzahl pro täglicher Übung</span><input type="number" id="set-limit" min="1" max="500" inputmode="numeric"></label>
                     <label class="field"><span>Tagesziel (Abfragen pro Tag)</span><input type="number" id="set-goal" min="1" max="500" inputmode="numeric"></label>
-                    <button type="button" id="settings-reset" class="mini secondary">Standardwerte</button>
+
+                    <h3 style="margin:16px 0 6px;">Erinnerung</h3>
+                    <span id="push-info" class="hint" role="status" aria-live="polite"></span>
+                    <label class="field"><span>Uhrzeit der täglichen Erinnerung</span><input type="time" id="set-time" value="18:00"></label>
+                    <button type="button" id="push-toggle" class="block nav-btn" data-state="off">Benachrichtigungen einschalten</button>
+                    <button type="button" id="push-test" class="block secondary" disabled>Testnachricht senden</button>
+                    <button type="button" id="settings-reset" class="mini secondary" style="margin-top:14px;">Standardwerte</button>
                 </details>
             </div>
         </div>
