@@ -244,7 +244,7 @@ const SUPABASE_URL = 'https://tjdgptcdlaaonuiogbzn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3qPEGh16ss9PzCWpJjuAeQ_zxwTPupX';
 const AUTH_DOMAIN = 'vokabeltrainer.app';   // nur für die interne Pseudo-E-Mail, es wird nie eine Mail versendet
 // Öffentlicher VAPID-Schlüssel für Erinnerungen (aus Schritt 1 der Push-Einrichtung). Solange hier der Platzhalter steht, ist Push aus.
-const VAPID_PUBLIC_KEY = 'HIER_DEN_OEFFENTLICHEN_SCHLUESSEL_EINTRAGEN';
+const VAPID_PUBLIC_KEY = 'BK95iNp0UlKjdo4rd3JeZDbudKwgFD3Mka5SJ1bKObFW1zPRw2D9rcu3IKpqsnsvtJ1yuwj29HEHphJRYr0gf3Y';
 const sb = (window.supabase && window.supabase.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
