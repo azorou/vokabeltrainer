@@ -97,6 +97,8 @@ const langPool = () => vocabularyPool.filter((v) => v.lang === currentLang);
 const autofixOn = () => { const el = $('autofix'); return !el || el.checked; };
 const normGapMarks = (s) => String(s).replace(/_{2,}/g, GAP);
 const clampInt = (v, lo, hi, def) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def; };
+const setVal = (id, v) => { const el = $(id); if (el) el.value = v; };
+const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
 
 function setStatus(msg, type = 'busy') {
     const el = $('status-text');
@@ -241,7 +243,8 @@ const addConfirmed = (text) => letters(text).forEach((w) => confirmedWords.add(w
 const SUPABASE_URL = 'https://tjdgptcdlaaonuiogbzn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3qPEGh16ss9PzCWpJjuAeQ_zxwTPupX';
 const AUTH_DOMAIN = 'vokabeltrainer.app';   // nur für die interne Pseudo-E-Mail, es wird nie eine Mail versendet
-const VAPID_PUBLIC_KEY = 'BK95iNp0UlKjdo4rd3JeZDbudKwgFD3Mka5SJ1bKObFW1zPRw2D9rcu3IKpqsnsvtJ1yuwj29HEHphJRYr0gf3Y';
+// Öffentlicher VAPID-Schlüssel für Erinnerungen (aus Schritt 1 der Push-Einrichtung). Solange hier der Platzhalter steht, ist Push aus.
+const VAPID_PUBLIC_KEY = 'HIER_DEN_OEFFENTLICHEN_SCHLUESSEL_EINTRAGEN';
 const sb = (window.supabase && window.supabase.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
@@ -469,7 +472,10 @@ async function enterAccount(acc) {
     setLang(lang);
     showTab('learn');
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-    if (!acc.guest) await syncOnLogin();
+    if (!acc.guest) {
+        await syncOnLogin();
+        ensurePushRow();
+    }
 }
 
 async function logout() {
@@ -477,6 +483,7 @@ async function logout() {
     if (account && !account.guest) {
         if (syncMeta.dirty) await pushToCloud();
         if (syncMeta.dirty && !confirm('Es gibt Änderungen, die noch nicht in der Cloud gespeichert sind. Trotzdem abmelden? Diese Änderungen gehen verloren.')) return;
+        await removePushRow();   // auf gemeinsam genutzten Geräten keine fremden Erinnerungen
         try { localStorage.removeItem(dataKey()); } catch (e) { /* egal */ }
         if (sb) { try { await sb.auth.signOut(); } catch (e) { /* egal */ } }
     }
@@ -502,29 +509,41 @@ function authErrorText(err) {
 
 async function authSubmit(kind) {
     const msg = (t) => { const el = $('login-msg'); el.textContent = t; el.hidden = !t; };
-    if (!sb) return msg('Der Konto-Dienst konnte nicht geladen werden (Internet prüfen).');
+    if (!sb) return msg('Der Konto-Dienst konnte nicht geladen werden (Internet prüfen und Seite neu laden).');
     const name = $('login-user').value.trim().toLowerCase();
     const pw = $('login-pass').value;
     if (!/^[a-z0-9_.-]{3,24}$/.test(name)) return msg('Benutzername: 3 bis 24 Zeichen (Buchstaben, Zahlen, _ . -).');
     if (pw.length < 6) return msg('Das Passwort braucht mindestens 6 Zeichen.');
 
     const buttons = $('login-form').querySelectorAll('button');
-    buttons.forEach((b) => { b.disabled = true; });
+    const setBusy = (b) => buttons.forEach((x) => { x.disabled = b; });
+    setBusy(true);
     msg('');
+
+    // 1) Anmeldung beim Konto-Dienst
+    let res;
     try {
         const email = `${name}@${AUTH_DOMAIN}`;
-        const res = kind === 'register'
+        res = kind === 'register'
             ? await sb.auth.signUp({ email, password: pw })
             : await sb.auth.signInWithPassword({ email, password: pw });
+    } catch (e) {
+        setBusy(false);
+        return msg('Verbindung zum Konto-Dienst fehlgeschlagen. Bitte Internetverbindung prüfen.');
+    }
+
+    // 2) Ergebnis auswerten und App starten
+    try {
         if (res.error) return msg(authErrorText(res.error));
         const user = res.data.user;
         if (kind === 'register' && user && user.identities && !user.identities.length) return msg('Diesen Benutzernamen gibt es schon.');
         if (!res.data.session) return msg('Konto angelegt, aber keine Anmeldung möglich: In Supabase muss „Confirm email“ ausgeschaltet sein.');
         await enterAccount({ id: user.id, name, guest: false });
     } catch (e) {
-        msg('Verbindung zum Konto-Dienst fehlgeschlagen.');
+        console.error(e);
+        msg(`Die Anmeldung war erfolgreich, aber die App konnte nicht starten: ${e.message || e}`);
     } finally {
-        buttons.forEach((b) => { b.disabled = false; });
+        setBusy(false);
     }
 }
 
@@ -900,7 +919,7 @@ function extractHeader(canvas) {
 /** Grüne Kästen (grüner Rahmen oben + unten) finden und weiß übermalen */
 function maskGreenBoxes(ctx, w, h) {
     const d = ctx.getImageData(0, 0, w, h).data;
-    const on = new Array(h).fill(false);
+    const onRow = new Array(h).fill(false);
     for (let y = 0; y < h; y++) {
         let c = 0;
         let o = y * w * 4;
@@ -908,12 +927,12 @@ function maskGreenBoxes(ctx, w, h) {
             const r = d[o], g = d[o + 1], b = d[o + 2];
             if (g > 120 && g - r > 35 && g - b > 45) c++;
         }
-        on[y] = c > w * 0.45;
+        onRow[y] = c > w * 0.45;
     }
     const lines = [];
     const gap = Math.max(3, Math.round(h * 0.002));
     for (let y = 0; y < h; y++) {
-        if (!on[y]) continue;
+        if (!onRow[y]) continue;
         const last = lines[lines.length - 1];
         if (last && y - last.y1 <= gap) last.y1 = y;
         else lines.push({ y0: y, y1: y });
@@ -1547,10 +1566,11 @@ function judgeDe(answer, item) {
 /* ================= Phasen-System ================= */
 const isNew = (v) => v.ok + v.bad === 0;
 
+/** Tägliche Übung wie bei Phase 6: alle neuen Vokabeln plus alle, deren Intervall abgelaufen ist */
 function dueList(pool) {
     const now = Date.now();
     const review = pool.filter((v) => !isNew(v) && v.due <= now).sort((a, b) => a.due - b.due || a.phase - b.phase);
-    const fresh = pool.filter(isNew);          // alle neuen Vokabeln, ohne Obergrenze
+    const fresh = pool.filter(isNew);
     return { review, fresh };
 }
 const troubleList = (pool) => pool
@@ -1650,13 +1670,11 @@ function renderPhaseBars(pool) {
 function renderToday() {
     const pool = selectedItems();
     const { review, fresh } = dueList(pool);
-    const list = [...review, ...fresh];
-    const revN = list.filter((v) => !isNew(v)).length;
-    const newN = list.length - revN;
+    const total = review.length + fresh.length;
     const t = todayStats();
 
-    $('today-summary').textContent = list.length
-        ? `${list.length} Vokabeln warten: ${revN} Wiederholungen und ${newN} neue.`
+    $('today-summary').textContent = total
+        ? `${total} Vokabeln warten: ${review.length} Wiederholungen und ${fresh.length} neue.`
         : `Heute ist nichts mehr fällig. Nächste Wiederholung: ${nextDueText(pool)}.`;
     const bar = $('goal-bar');
     bar.max = settings.dailyGoal;
@@ -1664,7 +1682,7 @@ function renderToday() {
     $('goal-text').textContent = `${t.n} von ${settings.dailyGoal} Abfragen heute${t.n ? `, davon ${t.ok} richtig` : ''}`;
     const s = streakDays();
     $('streak-text').textContent = `Serie: ${s} ${s === 1 ? 'Tag' : 'Tage'} in Folge`;
-    $('daily-btn').disabled = list.length === 0;
+    $('daily-btn').disabled = total === 0;
 
     const trouble = troubleList(pool);
     $('trouble-text').textContent = trouble.length
@@ -1709,21 +1727,23 @@ function renderLearn() {
 
 /* Einstellungen */
 function syncSettingsUI() {
-    settings.intervals.forEach((n, i) => { $(`iv-${i + 1}`).value = n; });
-    $('set-wrong').value = settings.onWrong;
-    $('set-goal').value = settings.dailyGoal;
-    $('set-time').value = settings.reminderTime;
+    settings.intervals.forEach((n, i) => setVal(`iv-${i + 1}`, n));
+    setVal('set-wrong', settings.onWrong);
+    setVal('set-goal', settings.dailyGoal);
+    setVal('set-time', settings.reminderTime);
     refreshPushUI();
 }
 function readSettingsUI() {
+    const get = (id, fallback) => { const el = $(id); return el ? el.value : fallback; };
     settings = sanitizeSettings({
-        intervals: [1, 2, 3, 4, 5, 6].map((i) => $(`iv-${i}`).value),
-        onWrong: $('set-wrong').value,
-        dailyGoal: $('set-goal').value,
-        reminderTime: $('set-time').value
+        intervals: [1, 2, 3, 4, 5, 6].map((i) => get(`iv-${i}`, settings.intervals[i - 1])),
+        onWrong: get('set-wrong', settings.onWrong),
+        dailyGoal: get('set-goal', settings.dailyGoal),
+        reminderTime: get('set-time', settings.reminderTime)
     });
     savePool();
     renderToday();
+    refreshPushUI();
     ensurePushRow();
 }
 
@@ -1792,7 +1812,7 @@ function itemMeta(v) {
     const parts = [`Phase ${v.phase}`];
     if (isNew(v)) parts.push('neu');
     else parts.push(v.due <= Date.now() ? 'fällig' : `fällig ${relDay(v.due)}`);
-    if (v.bad) parts.push(`${v.bad} ${v.bad === 1 ? 'Fehler' : 'Fehler'}`);
+    if (v.bad) parts.push(`${v.bad} Fehler`);
     if (v.bad >= 2 && v.streak < 3) parts.push('Problem-Vokabel');
     return parts.join(' · ');
 }
@@ -2043,7 +2063,7 @@ function beginSession(kind, list) {
 /** Gibt false zurück, wenn nichts zu üben ist (Meldung steht dann in der Übersicht) */
 function startDaily() {
     const { review, fresh } = dueList(selectedItems());
-    const list = [...review, ...fresh].slice(0, settings.dailyLimit);
+    const list = [...review, ...fresh];
     if (!list.length) {
         backToMain();
         setStatus(`Heute ist nichts mehr fällig. Nächste Wiederholung: ${nextDueText(selectedItems())}.`, 'ok');
@@ -2183,6 +2203,145 @@ function backToMain() {
     showTab(currentTab);
 }
 
+/* ================= Benachrichtigungen (Web Push) ================= */
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const pushConfigured = () => /^[A-Za-z0-9_-]{80,}$/.test(VAPID_PUBLIC_KEY);
+const userTimeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin'; } catch (e) { return 'Europe/Berlin'; } };
+
+function b64urlToBytes(s) {
+    const pad = '='.repeat((4 - (s.length % 4)) % 4);
+    const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+const withTimeout = (promise, ms, msg) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(msg)), ms))
+]);
+
+async function getPushSub() {
+    if (!pushSupported()) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? reg.pushManager.getSubscription() : null;
+}
+function setPushInfo(text, type = 'busy') {
+    const el = $('push-info');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = { busy: '#4a5568', ok: '#1e8449', error: '#c0392b' }[type];
+}
+
+async function refreshPushUI() {
+    try {
+        const onBtn = $('push-toggle');
+        const test = $('push-test');
+        if (!onBtn || !test) return;
+        onBtn.disabled = false;
+        test.disabled = true;
+        onBtn.dataset.state = 'off';
+        onBtn.textContent = 'Benachrichtigungen einschalten';
+        if (!account || account.guest) { onBtn.disabled = true; setPushInfo('Erinnerungen brauchen ein Konto (nicht im Gast-Modus).'); return; }
+        if (!pushConfigured()) { onBtn.disabled = true; setPushInfo('Noch nicht eingerichtet: Der öffentliche VAPID-Schlüssel fehlt in app.js.', 'error'); return; }
+        if (!pushSupported()) {
+            onBtn.disabled = true;
+            setPushInfo(isIos()
+                ? 'Auf iPhone/iPad nur in der installierten App möglich (Safari: Teilen, Zum Home-Bildschirm; ab iOS 16.4).'
+                : 'Dieser Browser unterstützt keine Push-Benachrichtigungen.', 'error');
+            return;
+        }
+        if (Notification.permission === 'denied') {
+            onBtn.disabled = true;
+            setPushInfo('Blockiert: Erlaube Benachrichtigungen für diese Seite in den Browser- oder Systemeinstellungen.', 'error');
+            return;
+        }
+        const sub = await getPushSub();
+        if (sub && Notification.permission === 'granted') {
+            onBtn.dataset.state = 'on';
+            onBtn.textContent = 'Benachrichtigungen ausschalten';
+            test.disabled = false;
+            setPushInfo(`Aktiv: tägliche Erinnerung um ${settings.reminderTime} Uhr, wenn Vokabeln fällig sind.`, 'ok');
+        } else {
+            setPushInfo('Ausgeschaltet.');
+        }
+    } catch (e) {
+        console.warn(e);
+    }
+}
+
+async function savePushRow(sub) {
+    const j = sub.toJSON();
+    const { error } = await sb.from('push_subscriptions').upsert({
+        user_id: account.id,
+        endpoint: j.endpoint,
+        p256dh: j.keys.p256dh,
+        auth: j.keys.auth,
+        reminder_time: settings.reminderTime,
+        timezone: userTimeZone(),
+        enabled: true,
+        user_agent: navigator.userAgent.slice(0, 200)
+    }, { onConflict: 'user_id,endpoint' });
+    if (error) throw error;
+}
+/** Hält die Serverzeile aktuell (Uhrzeit, Zeitzone) und legt sie nach einer erneuten Anmeldung wieder an */
+async function ensurePushRow() {
+    try {
+        if (!sb || !account || account.guest || !pushConfigured() || !pushSupported() || Notification.permission !== 'granted') return;
+        const sub = await getPushSub();
+        if (sub) await savePushRow(sub);
+    } catch (e) { console.warn('Push-Abo konnte nicht aktualisiert werden', e); }
+}
+async function removePushRow() {
+    try {
+        const sub = await getPushSub();
+        if (sub && sb && account) await sb.from('push_subscriptions').delete().eq('user_id', account.id).eq('endpoint', sub.endpoint);
+    } catch (e) { /* egal */ }
+}
+
+async function enablePush() {
+    if (!account || account.guest || !sb) return;
+    const btn = $('push-toggle');
+    btn.disabled = true;
+    try {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { setPushInfo('Die Erlaubnis wurde nicht erteilt.', 'error'); return; }
+        const reg = await withTimeout(navigator.serviceWorker.ready, 8000, 'Der Service Worker ist nicht aktiv. Seite neu laden und noch einmal versuchen.');
+        const key = b64urlToBytes(VAPID_PUBLIC_KEY);
+        let sub = await reg.pushManager.getSubscription();
+        if (sub) {   // Abo, das mit einem anderen Schlüssel erstellt wurde, erneuern
+            const cur = sub.options && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+            if (!cur || cur.length !== key.length || cur.some((b, i) => b !== key[i])) { await sub.unsubscribe(); sub = null; }
+        }
+        if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        await savePushRow(sub);
+    } catch (e) {
+        console.warn(e);
+        setPushInfo(`Fehler: ${e.message || e}`, 'error');
+    } finally {
+        btn.disabled = false;
+        refreshPushUI();
+    }
+}
+async function disablePush() {
+    try {
+        const sub = await getPushSub();
+        if (sub) {
+            await sb.from('push_subscriptions').delete().eq('user_id', account.id).eq('endpoint', sub.endpoint);
+            await sub.unsubscribe();
+        }
+    } catch (e) { console.warn(e); }
+    refreshPushUI();
+}
+async function sendTestPush() {
+    setPushInfo('Sende Testnachricht...');
+    try {
+        const { data, error } = await sb.functions.invoke('send-reminders', { body: { action: 'test' } });
+        if (error) throw error;
+        if (data && data.sent) setPushInfo('Testnachricht gesendet. Sie sollte gleich erscheinen.', 'ok');
+        else setPushInfo('Der Server hat nichts gesendet. Schalte die Benachrichtigungen aus und wieder ein.', 'error');
+    } catch (e) {
+        setPushInfo(`Fehler: ${e.message || e}`, 'error');
+    }
+}
+
 /* ================= PWA ================= */
 let installPrompt = null;
 const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -2308,17 +2467,22 @@ function setupPwa() {
 }
 
 /* ================= Init ================= */
+function showError(text) {
+    if (!$('main-screen').hidden) setStatus(text, 'error');
+    else { const el = $('login-msg'); el.textContent = text; el.hidden = false; }
+}
+
 function init() {
-    window.addEventListener('error', (ev) => {
-        const msg = `Skriptfehler: ${ev.message}`;
-        if (!$('main-screen').hidden) setStatus(msg, 'error');
-        else { const el = $('login-msg'); el.textContent = msg; el.hidden = false; }
-    });
+    // Fehler sichtbar machen statt still zu scheitern
+    window.addEventListener('error', (ev) => showError(`Skriptfehler: ${ev.message}`));
+    window.addEventListener('unhandledrejection', (ev) => showError(`Fehler: ${(ev.reason && ev.reason.message) || ev.reason}`));
 
     // Login
     $('login-form').addEventListener('submit', (e) => { e.preventDefault(); authSubmit('login'); });
     $('register-btn').addEventListener('click', () => authSubmit('register'));
-    $('guest-btn').addEventListener('click', () => enterAccount({ name: '', guest: true }));
+    $('guest-btn').addEventListener('click', () => {
+        enterAccount({ name: '', guest: true }).catch((e) => { console.error(e); showError(`Start fehlgeschlagen: ${e.message || e}`); });
+    });
     $('logout-btn').addEventListener('click', logout);
 
     // Sprache & Tabs
@@ -2338,18 +2502,18 @@ function init() {
     sel.addEventListener('change', () => { try { localStorage.setItem(MODE_KEY, sel.value); } catch (e) { /* egal */ } });
     $('start-btn').addEventListener('click', startFree);
 
-        // Einstellungen und Erinnerungen
+    // Einstellungen und Erinnerungen
     ['iv-1', 'iv-2', 'iv-3', 'iv-4', 'iv-5', 'iv-6', 'set-wrong', 'set-goal', 'set-time']
-        .forEach((id) => $(id).addEventListener('change', readSettingsUI));
-    $('settings-reset').addEventListener('click', () => {
+        .forEach((id) => on(id, 'change', readSettingsUI));
+    on('settings-reset', 'click', () => {
         settings = sanitizeSettings(DEFAULT_SETTINGS);
         syncSettingsUI();
         savePool();
         renderToday();
         ensurePushRow();
     });
-    $('push-toggle').addEventListener('click', () => ($('push-toggle').dataset.state === 'on' ? disablePush() : enablePush()));
-    $('push-test').addEventListener('click', sendTestPush);
+    on('push-toggle', 'click', () => ($('push-toggle').dataset.state === 'on' ? disablePush() : enablePush()));
+    on('push-test', 'click', sendTestPush);
 
     // Listen
     let searchTimer = null;
@@ -2458,14 +2622,14 @@ function init() {
     // Sitzung wiederherstellen
     showScreen('login');
     if (sessionStorage.getItem(SESSION_KEY) === 'guest') {
-        enterAccount({ name: '', guest: true });
+        enterAccount({ name: '', guest: true }).catch((e) => showError(`Start fehlgeschlagen: ${e.message || e}`));
         return;
     }
     if (sb) {
         sb.auth.getSession().then(({ data }) => {
             const u = data && data.session && data.session.user;
-            if (u) enterAccount({ id: u.id, name: (u.email || '').split('@')[0], guest: false });
-        }).catch(() => { /* zum Login */ });
+            if (u) return enterAccount({ id: u.id, name: (u.email || '').split('@')[0], guest: false });
+        }).catch((e) => console.warn('Sitzung konnte nicht wiederhergestellt werden', e));
     }
 }
 
