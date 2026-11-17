@@ -2334,9 +2334,28 @@ async function sendTestPush() {
     setPushInfo('Sende Testnachricht...');
     try {
         const { data, error } = await sb.functions.invoke('send-reminders', { body: { action: 'test' } });
-        if (error) throw error;
-        if (data && data.sent) setPushInfo('Testnachricht gesendet. Sie sollte gleich erscheinen.', 'ok');
-        else setPushInfo('Der Server hat nichts gesendet. Schalte die Benachrichtigungen aus und wieder ein.', 'error');
+        if (error) {
+            let detail = error.message || String(error);
+            if (error.context && typeof error.context.json === 'function') {
+                try {
+                    const j = await error.context.json();
+                    detail = j.error || j.message || JSON.stringify(j);
+                } catch (e) { /* Antwort war kein JSON */ }
+            } else if (error.name === 'FunctionsFetchError') {
+                detail = 'Die Funktion ist nicht erreichbar. Mögliche Ursachen: nicht bereitgestellt, Name stimmt nicht, "Verify JWT" ist noch an oder die Funktion startet nicht.';
+            }
+            throw new Error(detail);
+        }
+        if (data && data.sent) {
+            setPushInfo('Testnachricht gesendet. Sie sollte gleich erscheinen.', 'ok');
+        } else {
+            const why = data && data.errors && data.errors.length
+                ? data.errors[0]
+                : (data && data.subscriptions === 0
+                    ? 'Auf dem Server ist kein Abo gespeichert. Schalte die Benachrichtigungen aus und wieder ein.'
+                    : 'Unbekannter Grund (siehe Funktions-Logs im Dashboard).');
+            setPushInfo(`Nichts gesendet: ${why}`, 'error');
+        }
     } catch (e) {
         setPushInfo(`Fehler: ${e.message || e}`, 'error');
     }
