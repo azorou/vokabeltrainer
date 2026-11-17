@@ -12,7 +12,7 @@ const LANGS = {
     fr: { name: 'Französisch', adj: 'französischen', ocr: 'fra+deu', dict: ['fr', 'de'] },
     en: { name: 'Englisch', adj: 'englischen', ocr: 'eng+deu', dict: ['en', 'de'] }
 };
-const DEFAULT_SETTINGS = { intervals: [0, 1, 3, 7, 14, 30], onWrong: 'reset', newPerDay: 10, dailyLimit: 40, dailyGoal: 20 };
+const DEFAULT_SETTINGS = { intervals: [0, 1, 3, 7, 14, 30], onWrong: 'reset', dailyGoal: 20, reminderTime: '18:00' };
 
 let account = null;
 let currentLang = 'fr';
@@ -181,9 +181,8 @@ function sanitizeSettings(raw) {
     return {
         intervals: iv,
         onWrong: r.onWrong === 'back' ? 'back' : 'reset',
-        newPerDay: clampInt(r.newPerDay, 0, 200, DEFAULT_SETTINGS.newPerDay),
-        dailyLimit: clampInt(r.dailyLimit, 1, 500, DEFAULT_SETTINGS.dailyLimit),
-        dailyGoal: clampInt(r.dailyGoal, 1, 500, DEFAULT_SETTINGS.dailyGoal)
+        dailyGoal: clampInt(r.dailyGoal, 1, 500, DEFAULT_SETTINGS.dailyGoal),
+        reminderTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(r.reminderTime)) ? String(r.reminderTime) : DEFAULT_SETTINGS.reminderTime
     };
 }
 function sanitizeStats(raw) {
@@ -1550,8 +1549,7 @@ const isNew = (v) => v.ok + v.bad === 0;
 function dueList(pool) {
     const now = Date.now();
     const review = pool.filter((v) => !isNew(v) && v.due <= now).sort((a, b) => a.due - b.due || a.phase - b.phase);
-    const newLeft = Math.max(0, settings.newPerDay - todayStats().nw);
-    const fresh = pool.filter(isNew).slice(0, newLeft);
+    const fresh = pool.filter(isNew);          // alle neuen Vokabeln, ohne Obergrenze
     return { review, fresh };
 }
 const troubleList = (pool) => pool
@@ -1651,7 +1649,7 @@ function renderPhaseBars(pool) {
 function renderToday() {
     const pool = selectedItems();
     const { review, fresh } = dueList(pool);
-    const list = [...review, ...fresh].slice(0, settings.dailyLimit);
+    const list = [...review, ...fresh];
     const revN = list.filter((v) => !isNew(v)).length;
     const newN = list.length - revN;
     const t = todayStats();
@@ -1712,20 +1710,20 @@ function renderLearn() {
 function syncSettingsUI() {
     settings.intervals.forEach((n, i) => { $(`iv-${i + 1}`).value = n; });
     $('set-wrong').value = settings.onWrong;
-    $('set-new').value = settings.newPerDay;
-    $('set-limit').value = settings.dailyLimit;
     $('set-goal').value = settings.dailyGoal;
+    $('set-time').value = settings.reminderTime;
+    refreshPushUI();
 }
 function readSettingsUI() {
     settings = sanitizeSettings({
         intervals: [1, 2, 3, 4, 5, 6].map((i) => $(`iv-${i}`).value),
         onWrong: $('set-wrong').value,
-        newPerDay: $('set-new').value,
-        dailyLimit: $('set-limit').value,
-        dailyGoal: $('set-goal').value
+        dailyGoal: $('set-goal').value,
+        reminderTime: $('set-time').value
     });
     savePool();
     renderToday();
+    ensurePushRow();
 }
 
 /* ================= Listen-Ansicht ================= */
@@ -2339,15 +2337,18 @@ function init() {
     sel.addEventListener('change', () => { try { localStorage.setItem(MODE_KEY, sel.value); } catch (e) { /* egal */ } });
     $('start-btn').addEventListener('click', startFree);
 
-    // Einstellungen
-    ['iv-1', 'iv-2', 'iv-3', 'iv-4', 'iv-5', 'iv-6', 'set-wrong', 'set-new', 'set-limit', 'set-goal']
+        // Einstellungen und Erinnerungen
+    ['iv-1', 'iv-2', 'iv-3', 'iv-4', 'iv-5', 'iv-6', 'set-wrong', 'set-goal', 'set-time']
         .forEach((id) => $(id).addEventListener('change', readSettingsUI));
     $('settings-reset').addEventListener('click', () => {
         settings = sanitizeSettings(DEFAULT_SETTINGS);
         syncSettingsUI();
         savePool();
         renderToday();
+        ensurePushRow();
     });
+    $('push-toggle').addEventListener('click', () => ($('push-toggle').dataset.state === 'on' ? disablePush() : enablePush()));
+    $('push-test').addEventListener('click', sendTestPush);
 
     // Listen
     let searchTimer = null;
