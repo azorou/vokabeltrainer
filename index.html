@@ -96,6 +96,12 @@
         details.manual { background: #f8f9fa; border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; margin: 0 0 14px; text-align: left; }
         details.manual summary { cursor: pointer; font-weight: bold; color: var(--ink); }
 
+        /* Frageart-Dialog */
+        dialog.mode-dialog { border: none; border-radius: 14px; padding: 20px; max-width: 480px; width: calc(100% - 32px); box-shadow: 0 20px 50px rgba(0,0,0,.28); color: #333; text-align: left; }
+        dialog.mode-dialog::backdrop { background: rgba(0,0,0,.45); }
+        .mode-options { border: none; padding: 0; margin: 0 0 10px; }
+        .mode-options .check-row { padding: 11px 4px; }
+
         /* Hinzufügen */
         .upload-zone { display: block; border: 3px dashed var(--blue); padding: 26px 20px; border-radius: 12px; background: #f9fbfd; cursor: pointer; margin-bottom: 12px; text-align: center; transition: all .3s; }
         .upload-zone:hover { background: #ecf5fc; border-color: var(--blue-d); }
@@ -113,8 +119,9 @@
         .item-main { min-width: 0; overflow-wrap: anywhere; }
         .item-sent { font-size: 13px; font-style: italic; color: #4a5568; margin-top: 2px; }
         .item-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
-        .item-actions { display: flex; gap: 6px; align-items: flex-start; flex: none; }
+        .item-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: flex-end; flex: none; max-width: 190px; }
         .fix-note { font-size: 12px; color: #9a6700; background: #fff8e1; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
+        .warn-note { font-size: 12px; color: #9c2b1b; background: #fdecea; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
         .editor { border: 2px solid var(--blue); border-radius: 8px; padding: 10px 12px; margin: 6px 0; background: #f9fbfd; text-align: left; }
         .editor .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
@@ -126,6 +133,16 @@
         .feedback.correct { color: #1e8449; }
         .feedback.wrong { color: #c0392b; }
         .stats-info { margin-top: 25px; font-size: 13px; color: #7f8c8d; }
+
+        /* Karteikarte (Übungsmodus) */
+        .flashcard-box { margin-top: 28px; }
+        button.flashcard { display: block; width: 100%; min-height: 120px; padding: 18px; background: #fffbea; color: var(--ink); border: 2px dashed #e0b84a; border-radius: 12px; box-shadow: none; font-size: 18px; font-weight: normal; line-height: 1.5; white-space: pre-line; text-align: center; overflow-wrap: anywhere; }
+        button.flashcard:hover { background: #fff6d6; transform: none; }
+        button.flashcard[data-flipped="1"] { background: #e8f6ee; border: 2px solid #5fb989; font-weight: bold; }
+        button.flashcard.flip { animation: flip .35s ease; }
+        .fc-side[hidden] { display: none; }
+        @keyframes flip { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+        @media (prefers-reduced-motion: reduce) { button.flashcard.flip { animation: none; } }
 
         [hidden] { display: none !important; }
         .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -157,6 +174,8 @@
             .iv-grid { grid-template-columns: repeat(2, 1fr); }
             .phase-row { grid-template-columns: 110px 1fr 30px; }
             .word-display { font-size: 27px; }
+            .item { flex-direction: column; }
+            .item-actions { justify-content: flex-start; max-width: none; }
         }
 
         /* Installierte App */
@@ -270,14 +289,7 @@
 
                 <section class="panel" aria-labelledby="free-title">
                     <h3 id="free-title">Freies Üben</h3>
-                    <label class="field" for="mode-select"><span>Abfrage-Modus (ändert die Phasen nicht)</span>
-                        <select id="mode-select">
-                            <option value="translate"></option>
-                            <option value="reverse"></option>
-                            <option value="gap"></option>
-                            <option value="both"></option>
-                        </select>
-                    </label>
+                    <p>Üben ohne Einfluss auf die Phasen, mit frei gewählter Frageart.</p>
                     <button type="button" id="start-btn" class="block nav-btn">Freies Üben starten</button>
                 </section>
 
@@ -320,6 +332,7 @@
                 <button type="button" id="expand-btn" class="mini secondary">Alle öffnen</button>
                 <button type="button" id="collapse-btn" class="mini secondary">Alle schließen</button>
             </div>
+            <label class="check"><input type="checkbox" id="only-warn"> Nur Einträge zeigen, die geprüft werden sollten <span id="warn-count" class="inline-hint"></span></label>
             <p id="list-empty" class="lead" hidden></p>
             <div id="list-tree"></div>
             <div class="tools">
@@ -335,11 +348,11 @@
             <h2>Hinzufügen</h2>
             <fieldset>
                 <legend>Bereich für neue Vokabeln</legend>
-                <span class="hint" style="margin:0 0 8px;">Leer lassen = automatisch aus Seitenköpfen und Überschriften (Unité, Volet, Module, Unit, Texts ...). Wenn du etwas einträgst, startet der Import in diesem Bereich.</span>
+                <span class="hint" style="margin:0 0 8px;">Leer lassen = automatisch aus Seitenköpfen und Überschriften erkennen (Unité, Volet, Module, Unit, Across cultures, Focus, Texts ...). Wenn du etwas einträgst, startet der Import in diesem Bereich.</span>
                 <div class="path-grid">
                     <label class="field"><span>Ebene 1 (z. B. Unité 1)</span><input type="text" id="path-1" list="dl-1" autocomplete="off"></label>
                     <label class="field"><span>Ebene 2 (z. B. Volet 2)</span><input type="text" id="path-2" list="dl-2" autocomplete="off"></label>
-                    <label class="field"><span>Ebene 3 (z. B. Module A)</span><input type="text" id="path-3" list="dl-3" autocomplete="off"></label>
+                    <label class="field"><span>Ebene 3 (optional)</span><input type="text" id="path-3" list="dl-3" autocomplete="off"></label>
                 </div>
                 <label class="check"><input type="checkbox" id="autodetect" checked> Bereiche automatisch erkennen</label>
             </fieldset>
@@ -353,6 +366,7 @@
             <button type="button" id="camera-btn" class="block nav-btn">Seiten mit der Kamera aufnehmen</button>
             <input type="file" id="cam-input" class="sr-only" accept="image/*" capture="environment">
             <label class="check"><input type="checkbox" id="autofix" checked> Automatische Korrektur (Wörterbuch &amp; Kontext)</label>
+            <label class="check"><input type="checkbox" id="autosplit" checked> Doppelseiten automatisch teilen (bei einer einzelnen Seite im Querformat abschalten)</label>
 
             <details class="manual" style="margin-top:16px;">
                 <summary>Vokabel manuell hinzufügen</summary>
@@ -377,6 +391,16 @@
         <button type="button" id="action-btn" class="block">Antwort prüfen</button>
         <div class="feedback" id="feedback-display" role="status" aria-live="polite"></div>
         <div class="stats-info" id="stats-display"></div>
+
+        <!-- Karteikarte: nur im Übungsmodus und nur für Vokabeln in Phase 1 -->
+        <div id="flashcard-box" class="flashcard-box" hidden>
+            <button type="button" id="flashcard" class="flashcard" data-flipped="0" aria-pressed="false">
+                <span id="fc-front" class="fc-side">Karteikarte: Tippen zum Umdrehen und die Auflösung ansehen</span>
+                <span id="fc-back" class="fc-side" hidden></span>
+            </button>
+            <span class="hint">Wenn du die Karte ansiehst, zählt die Vokabel als geübt, aber noch nicht als gekonnt. Sie kommt danach noch einmal.</span>
+        </div>
+
         <button type="button" id="quit-btn" class="link-btn">Abbrechen und zurück</button>
     </section>
 
@@ -388,6 +412,25 @@
         <button type="button" id="back-btn" class="block secondary">Zurück zur Übersicht</button>
     </section>
 </div>
+
+<!-- Frageart wählen (vor jeder Übung) -->
+<dialog id="mode-dialog" class="mode-dialog" aria-labelledby="mode-title">
+    <form id="mode-form">
+        <h3 id="mode-title">Wie möchtest du üben?</h3>
+        <p class="hint" id="mode-count" style="margin:0 0 10px;"></p>
+        <fieldset class="mode-options">
+            <legend class="sr-only">Frageart</legend>
+            <label class="check-row"><input type="radio" name="qmode" value="translate" checked><span id="mo-translate"></span></label>
+            <label class="check-row"><input type="radio" name="qmode" value="reverse"><span id="mo-reverse"></span></label>
+            <label class="check-row"><input type="radio" name="qmode" value="gap"><span id="mo-gap"></span></label>
+            <label class="check-row"><input type="radio" name="qmode" value="mixed"><span id="mo-mixed"></span></label>
+        </fieldset>
+        <span class="hint">Vokabeln ohne Lückentext werden beim Lückentext normal abgefragt.</span>
+        <label class="check" style="margin-top:14px;"><input type="checkbox" id="mode-practice"> Übungsmodus: Karteikarte zum Umdrehen für Vokabeln in Phase 1</label>
+        <button type="submit" class="block nav-btn">Starten</button>
+        <button type="button" id="mode-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
 
 <!-- Kamera -->
 <dialog id="camera-dialog" class="camera-dialog" aria-label="Kamera">
