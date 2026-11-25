@@ -29,7 +29,7 @@
         .lead { color: var(--muted); margin: 0 0 18px; }
         .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; }
         .inline-hint { font-weight: normal; font-size: 12px; color: var(--muted); margin-left: 6px; }
-        #login-screen, #trainer-screen, #end-screen { text-align: center; max-width: 560px; margin: 0 auto; }
+        #login-screen, #trainer-screen, #card-screen, #end-screen { text-align: center; max-width: 560px; margin: 0 auto; }
 
         /* Buttons */
         button { font-family: inherit; background: #2ecc71; color: #fff; border: none; padding: 12px 22px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(46,204,113,.2); transition: all .2s; }
@@ -47,11 +47,19 @@
         button.link-btn:hover { background: none; transform: none; color: #1c5d8a; }
         button.icon-btn { background: #eef2f7; color: var(--ink); box-shadow: none; padding: 4px 10px; font-size: 13px; font-weight: normal; }
         button.icon-btn:hover { background: #dde5ee; transform: none; }
+        .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+        .btn-row button { flex: 1 1 160px; margin: 0; }
+
+        /* Hilfetext (i) */
+        button.info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin-left: 6px; border-radius: 50%; background: #dbe7f3; color: var(--blue-d); box-shadow: none; font-size: 12px; font-weight: bold; font-style: italic; font-family: Georgia, serif; vertical-align: middle; line-height: 1; }
+        button.info-btn:hover, button.info-btn[aria-expanded="true"] { background: var(--blue); color: #fff; transform: none; }
+        .info-pop { position: fixed; z-index: 1000; background: #2c3e50; color: #fff; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.45; font-weight: normal; box-shadow: 0 8px 24px rgba(0,0,0,.3); max-width: 300px; text-align: left; }
+        .info-pop[hidden] { display: none; }
 
         /* Formulare */
         .field { display: block; text-align: left; margin: 10px 0; }
         .field > span { display: block; font-size: 13px; color: #4a5568; margin-bottom: 4px; }
-        select, input[type="text"], input[type="password"], input[type="search"], input[type="number"], input[type="time"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
+        select, input[type="text"], input[type="password"], input[type="search"], input[type="number"], input[type="time"], input[type="date"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
         select:focus, input:focus { border-color: var(--blue); }
         #user-input { max-width: 420px; font-size: 20px; text-align: center; }
         .check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #4a5568; margin: 10px 0; }
@@ -63,7 +71,7 @@
         .inline-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
         .path-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .iv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-        .tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
+        .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
         /* Kopf, Sprache, Tabs */
         .app-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
@@ -76,7 +84,7 @@
         .lang-switch button:last-child { border-radius: 0 8px 8px 0; border-left: none; }
         .lang-switch button[aria-pressed="true"] { background: var(--blue); color: #fff; }
         .tabbar { display: flex; gap: 6px; margin: 0 0 16px; border-bottom: 2px solid var(--line); }
-        button.tab { flex: 1; background: none; color: var(--muted); box-shadow: none; padding: 12px 8px; border-radius: 8px 8px 0 0; border-bottom: 3px solid transparent; font-size: 15px; }
+        button.tab { flex: 1; background: none; color: var(--muted); box-shadow: none; padding: 12px 6px; border-radius: 8px 8px 0 0; border-bottom: 3px solid transparent; font-size: 15px; }
         button.tab:hover { background: #f4f8fc; transform: none; }
         button.tab[aria-selected="true"] { color: var(--blue-d); border-bottom-color: var(--blue); }
 
@@ -84,9 +92,11 @@
         .conflict-box { background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 12px 15px; margin: 0 0 15px; text-align: left; }
 
         /* Üben */
-        .today, .panel { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 0 0 14px; background: #f9fbfd; text-align: left; }
+        .today, .panel, .set-group { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 0 0 14px; background: #f9fbfd; text-align: left; }
         .today { border-color: #bcdcf5; background: #eaf4fd; }
         .today p, .panel p { margin: 0 0 6px; }
+        .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+        .panel-head h3 { margin: 0; }
         progress { width: 100%; height: 14px; margin-top: 4px; }
         .phase-row { display: grid; grid-template-columns: 130px 1fr 36px; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
         .phase-bar { display: block; height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
@@ -95,12 +105,16 @@
         #group-list { max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
         details.manual { background: #f8f9fa; border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; margin: 0 0 14px; text-align: left; }
         details.manual summary { cursor: pointer; font-weight: bold; color: var(--ink); }
+        .exam-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid #e2e8f0; }
+        .exam-info { min-width: 0; overflow-wrap: anywhere; }
+        .exam-row .item-actions { align-items: center; }
 
-        /* Frageart-Dialog */
-        dialog.mode-dialog { border: none; border-radius: 14px; padding: 20px; max-width: 480px; width: calc(100% - 32px); box-shadow: 0 20px 50px rgba(0,0,0,.28); color: #333; text-align: left; }
+        /* Dialoge */
+        dialog.mode-dialog { border: none; border-radius: 14px; padding: 20px; max-width: 480px; width: calc(100% - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,.28); color: #333; text-align: left; }
         dialog.mode-dialog::backdrop { background: rgba(0,0,0,.45); }
         .mode-options { border: none; padding: 0; margin: 0 0 10px; }
         .mode-options .check-row { padding: 11px 4px; }
+        #ex-cats { max-height: 32vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; }
 
         /* Hinzufügen */
         .upload-zone { display: block; border: 3px dashed var(--blue); padding: 26px 20px; border-radius: 12px; background: #f9fbfd; cursor: pointer; margin-bottom: 12px; text-align: center; transition: all .3s; }
@@ -110,37 +124,45 @@
 
         /* Listen */
         #list-tree { margin-top: 8px; }
+        .select-bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+        .select-bar button { padding: 6px 12px; font-size: 13px; }
         details.sec { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; background: #fff; }
-        details.sec > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; padding: 10px 12px; font-weight: bold; color: var(--ink); }
+        details.sec > summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; padding: 10px 12px; font-weight: bold; color: var(--ink); }
         details.sec details.sec { margin: 8px 10px; }
-        .sec-actions { display: flex; gap: 6px; }
+        .sec-actions { display: flex; flex-wrap: wrap; gap: 6px; }
         .sec-body { padding: 0 8px 8px; }
-        .item { display: flex; justify-content: space-between; gap: 8px; padding: 8px 6px; border-top: 1px solid #edf2f7; text-align: left; }
-        .item-main { min-width: 0; overflow-wrap: anywhere; }
+        .item { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 6px; border-top: 1px solid #edf2f7; text-align: left; }
+        .item .row-check { width: 20px; height: 20px; margin-top: 3px; flex: none; }
+        .item-main { min-width: 0; flex: 1; overflow-wrap: anywhere; }
         .item-sent { font-size: 13px; font-style: italic; color: #4a5568; margin-top: 2px; }
         .item-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
-        .item-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: flex-end; flex: none; max-width: 190px; }
+        .item-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: flex-end; flex: none; max-width: 200px; }
         .fix-note { font-size: 12px; color: #9a6700; background: #fff8e1; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
         .warn-note { font-size: 12px; color: #9c2b1b; background: #fdecea; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
+        mark.lowconf { background: #fde2c8; color: inherit; border-radius: 3px; padding: 0 2px; text-decoration: underline wavy #c0392b; text-underline-offset: 3px; }
         .editor { border: 2px solid var(--blue); border-radius: 8px; padding: 10px 12px; margin: 6px 0; background: #f9fbfd; text-align: left; }
         .editor .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
-        /* Trainer */
+        /* Einstellungen */
+        .set-group h3 { margin-bottom: 10px; }
+        .set-group .field:first-of-type { margin-top: 0; }
+
+        /* Abfrage */
         .phase-badge { background: #34495e; color: #fff; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
         .word-display { font-size: 32px; font-weight: bold; color: var(--ink); margin: 25px 0 15px; overflow-wrap: anywhere; }
         .sentence-box { background: #eef2f7; padding: 18px; border-radius: 8px; font-style: italic; color: #4a5568; margin: 20px 0; line-height: 1.5; font-size: 16px; border-left: 5px solid var(--blue); text-align: left; }
         .feedback { font-size: 20px; font-weight: bold; margin-top: 20px; }
         .feedback.correct { color: #1e8449; }
         .feedback.wrong { color: #c0392b; }
-        .stats-info { margin-top: 25px; font-size: 13px; color: #7f8c8d; }
+        .stats-info { margin-top: 20px; font-size: 13px; color: #7f8c8d; }
 
-        /* Karteikarte (Übungsmodus) */
-        .flashcard-box { margin-top: 28px; }
-        button.flashcard { display: block; width: 100%; min-height: 120px; padding: 18px; background: #fffbea; color: var(--ink); border: 2px dashed #e0b84a; border-radius: 12px; box-shadow: none; font-size: 18px; font-weight: normal; line-height: 1.5; white-space: pre-line; text-align: center; overflow-wrap: anywhere; }
+        /* Karteikarten (Übungsmodus) */
+        button.flashcard { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; width: 100%; min-height: 240px; padding: 24px; margin-top: 18px; background: #fffbea; color: var(--ink); border: 2px solid #e0b84a; border-radius: 16px; box-shadow: 0 6px 16px rgba(0,0,0,.08); font-family: inherit; font-weight: normal; white-space: pre-line; text-align: center; }
         button.flashcard:hover { background: #fff6d6; transform: none; }
-        button.flashcard[data-flipped="1"] { background: #e8f6ee; border: 2px solid #5fb989; font-weight: bold; }
+        button.flashcard[data-flipped="1"] { background: #e8f6ee; border-color: #5fb989; }
         button.flashcard.flip { animation: flip .35s ease; }
-        .fc-side[hidden] { display: none; }
+        .fc-label { font-size: 13px; color: var(--muted); }
+        .fc-text { font-size: 26px; font-weight: bold; line-height: 1.35; overflow-wrap: anywhere; }
         @keyframes flip { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
         @media (prefers-reduced-motion: reduce) { button.flashcard.flip { animation: none; } }
 
@@ -168,14 +190,15 @@
             .lang-switch { width: 100%; order: 3; }
             .lang-switch button { flex: 1; }
             .tabbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; background: #fff; border-top: 1px solid var(--line); border-bottom: none; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); z-index: 20; }
-            button.tab { border-bottom: none; border-top: 3px solid transparent; border-radius: 0; padding: 14px 4px 16px; font-size: 14px; }
+            button.tab { border-bottom: none; border-top: 3px solid transparent; border-radius: 0; padding: 14px 2px 16px; font-size: 13px; }
             button.tab[aria-selected="true"] { border-top-color: var(--blue); }
             .path-grid { grid-template-columns: 1fr; }
             .iv-grid { grid-template-columns: repeat(2, 1fr); }
             .phase-row { grid-template-columns: 110px 1fr 30px; }
             .word-display { font-size: 27px; }
-            .item { flex-direction: column; }
-            .item-actions { justify-content: flex-start; max-width: none; }
+            .item { flex-wrap: wrap; }
+            .item-actions { justify-content: flex-start; max-width: none; width: 100%; }
+            .exam-row { flex-wrap: wrap; }
         }
 
         /* Installierte App */
@@ -209,7 +232,7 @@
             <label class="field"><span>Benutzername</span>
                 <input type="text" id="login-user" autocomplete="username" autocapitalize="off" spellcheck="false" required>
             </label>
-            <label class="field"><span>Passwort</span>
+            <label class="field"><span>Passwort <button type="button" class="info-btn" data-info="Es gibt keine Passwort-Wiederherstellung. Merke dir dein Passwort oder speichere unter Einstellungen eine Sicherung." aria-label="Information" aria-expanded="false">i</button></span>
                 <input type="password" id="login-pass" autocomplete="current-password" required>
             </label>
             <button type="submit" class="block nav-btn">Anmelden</button>
@@ -217,7 +240,6 @@
             <button type="button" id="guest-btn" class="link-btn">Ohne Konto fortfahren (nur dieses Gerät)</button>
         </form>
         <div id="login-msg" class="status" style="color:#c0392b;margin-top:12px;" role="alert" hidden></div>
-        <span class="hint">Es gibt keine Passwort-Wiederherstellung: Merke dir dein Passwort oder speichere eine Sicherung.</span>
     </section>
 
     <!-- HAUPTBEREICH -->
@@ -239,6 +261,7 @@
             <button type="button" role="tab" class="tab" id="tab-learn" data-tab="learn" aria-controls="view-learn" aria-selected="true">Üben</button>
             <button type="button" role="tab" class="tab" id="tab-lists" data-tab="lists" aria-controls="view-lists" aria-selected="false">Listen</button>
             <button type="button" role="tab" class="tab" id="tab-add" data-tab="add" aria-controls="view-add" aria-selected="false">Hinzufügen</button>
+            <button type="button" role="tab" class="tab" id="tab-settings" data-tab="settings" aria-controls="view-settings" aria-selected="false">Einstellungen</button>
         </nav>
 
         <div id="conflict-box" class="conflict-box" role="alertdialog" aria-labelledby="conflict-title" tabindex="-1" hidden>
@@ -258,25 +281,36 @@
             <div id="learn-body">
 
                 <section class="today" aria-labelledby="today-title">
-                    <h3 id="today-title">Heute</h3>
+                    <h3 id="today-title">Heute <button type="button" class="info-btn" data-info="Tägliche Übung wie bei Phase 6: Alle neuen Vokabeln und alle, deren Wiederholungstermin erreicht ist. Richtig beantwortete Vokabeln steigen eine Phase auf und kommen später wieder, falsche beginnen von vorn." aria-label="Information" aria-expanded="false">i</button></h3>
                     <p id="today-summary"></p>
-                    <label for="goal-bar" class="hint">Tagesziel</label>
+                    <label for="goal-bar" class="sr-only">Tagesziel</label>
                     <progress id="goal-bar" value="0" max="20"></progress>
                     <span id="goal-text" class="hint"></span>
                     <span id="streak-text" class="hint"></span>
                     <button type="button" id="daily-btn" class="block nav-btn">Tägliche Übung starten</button>
                 </section>
 
-                <section class="panel" aria-labelledby="phases-title">
-                    <h3 id="phases-title">Phasen</h3>
-                    <div id="phase-bars"></div>
+                <section class="panel" aria-labelledby="exam-heading">
+                    <div class="panel-head">
+                        <h3 id="exam-heading">Prüfungen <button type="button" class="info-btn" data-info="Lege eine Prüfung mit Datum und Vokabeln an. Bis dahin werden diese Vokabeln jeden Tag abgefragt. Schwache Vokabeln öfter, sichere seltener. Die Prüfungsliste bleibt unsichtbar und hat eine eigene Wertung." aria-label="Information" aria-expanded="false">i</button></h3>
+                        <button type="button" id="exam-new" class="mini nav-btn">Neue Prüfung</button>
+                    </div>
+                    <p id="exam-empty" class="hint">Noch keine Prüfung angelegt.</p>
+                    <div id="exam-list"></div>
                 </section>
 
-                <section class="panel" aria-labelledby="trouble-title">
-                    <h3 id="trouble-title">Problem-Vokabeln</h3>
-                    <p id="trouble-text"></p>
-                    <button type="button" id="trouble-btn" class="block secondary">Problem-Vokabeln trainieren</button>
+                <section class="panel" aria-labelledby="more-title">
+                    <h3 id="more-title">Weitere Übungen <button type="button" class="info-btn" data-info="Freies Üben ändert die Phasen nicht. Problem-Vokabeln sind Vokabeln mit mindestens 2 Fehlern, die noch nicht 3-mal in Folge richtig waren." aria-label="Information" aria-expanded="false">i</button></h3>
+                    <div class="btn-row">
+                        <button type="button" id="start-btn" class="secondary">Freies Üben</button>
+                        <button type="button" id="trouble-btn" class="secondary">Problem-Vokabeln</button>
+                    </div>
                 </section>
+
+                <details class="manual" id="progress-box">
+                    <summary>Fortschritt nach Phasen</summary>
+                    <div id="phase-bars" style="margin-top:10px;"></div>
+                </details>
 
                 <details class="manual" id="area-box">
                     <summary>Bereiche auswählen <span id="sel-count" class="inline-hint"></span></summary>
@@ -285,39 +319,6 @@
                         <button type="button" id="sel-none" class="mini secondary">Keine</button>
                     </div>
                     <div id="group-list"></div>
-                </details>
-
-                <section class="panel" aria-labelledby="free-title">
-                    <h3 id="free-title">Freies Üben</h3>
-                    <p>Üben ohne Einfluss auf die Phasen, mit frei gewählter Frageart.</p>
-                    <button type="button" id="start-btn" class="block nav-btn">Freies Üben starten</button>
-                </section>
-
-                <details class="manual" id="settings-box">
-                    <summary>Einstellungen (Phasen, Tagesziel, Erinnerung)</summary>
-                    <span class="hint">Abstand in Tagen, bis eine Vokabel in der jeweiligen Phase wieder abgefragt wird (0 = sofort).</span>
-                    <div class="iv-grid">
-                        <label class="field"><span>Phase 1</span><input type="number" id="iv-1" min="0" max="365" inputmode="numeric"></label>
-                        <label class="field"><span>Phase 2</span><input type="number" id="iv-2" min="0" max="365" inputmode="numeric"></label>
-                        <label class="field"><span>Phase 3</span><input type="number" id="iv-3" min="0" max="365" inputmode="numeric"></label>
-                        <label class="field"><span>Phase 4</span><input type="number" id="iv-4" min="0" max="365" inputmode="numeric"></label>
-                        <label class="field"><span>Phase 5</span><input type="number" id="iv-5" min="0" max="365" inputmode="numeric"></label>
-                        <label class="field"><span>Phase 6</span><input type="number" id="iv-6" min="0" max="365" inputmode="numeric"></label>
-                    </div>
-                    <label class="field"><span>Bei einem Fehler</span>
-                        <select id="set-wrong">
-                            <option value="reset">Zurück in Phase 1</option>
-                            <option value="back">Nur eine Phase zurück</option>
-                        </select>
-                    </label>
-                    <label class="field"><span>Tagesziel (Abfragen pro Tag)</span><input type="number" id="set-goal" min="1" max="500" inputmode="numeric"></label>
-
-                    <h3 style="margin:16px 0 6px;">Erinnerung</h3>
-                    <span id="push-info" class="hint" role="status" aria-live="polite"></span>
-                    <label class="field"><span>Uhrzeit der täglichen Erinnerung</span><input type="time" id="set-time" value="18:00"></label>
-                    <button type="button" id="push-toggle" class="block nav-btn" data-state="off">Benachrichtigungen einschalten</button>
-                    <button type="button" id="push-test" class="block secondary" disabled>Testnachricht senden</button>
-                    <button type="button" id="settings-reset" class="mini secondary" style="margin-top:14px;">Standardwerte</button>
                 </details>
             </div>
         </div>
@@ -329,59 +330,112 @@
                 <input type="search" id="list-search" placeholder="Suchen (Wort, Übersetzung, Satz)..." autocomplete="off">
             </label>
             <div class="inline-tools">
+                <button type="button" id="select-btn" class="mini nav-btn">Auswählen</button>
                 <button type="button" id="expand-btn" class="mini secondary">Alle öffnen</button>
                 <button type="button" id="collapse-btn" class="mini secondary">Alle schließen</button>
             </div>
-            <label class="check"><input type="checkbox" id="only-warn"> Nur Einträge zeigen, die geprüft werden sollten <span id="warn-count" class="inline-hint"></span></label>
+            <div id="select-bar" class="select-bar" hidden>
+                <strong id="select-count">0 ausgewählt</strong>
+                <button type="button" id="sel-move" class="nav-btn" disabled>Verschieben</button>
+                <button type="button" id="sel-exam" class="secondary" disabled>Zur Prüfung</button>
+                <button type="button" id="sel-delete" class="danger" disabled>Löschen</button>
+                <button type="button" id="sel-cancel" class="secondary">Fertig</button>
+            </div>
+            <label class="check"><input type="checkbox" id="only-warn"> Nur Einträge zeigen, die geprüft werden sollten <span id="warn-count" class="inline-hint"></span>
+                <button type="button" class="info-btn" data-info="Unsicher gelesene Wörter sind orange unterlegt. Mit „Geprüft“ nimmst du die Markierung weg, mit „Bearbeiten“ korrigierst du den Eintrag." aria-label="Information" aria-expanded="false">i</button></label>
             <p id="list-empty" class="lead" hidden></p>
             <div id="list-tree"></div>
-            <div class="tools">
-                <button type="button" id="export-btn" class="secondary">Sicherung speichern</button>
-                <button type="button" id="import-btn" class="secondary">Sicherung laden</button>
-                <button type="button" id="clear-btn" class="danger" hidden>Liste leeren</button>
-            </div>
-            <input type="file" id="import-input" class="sr-only" accept="application/json,.json">
         </div>
 
         <!-- HINZUFÜGEN -->
         <div id="view-add" role="tabpanel" aria-labelledby="tab-add" hidden>
             <h2>Hinzufügen</h2>
             <fieldset>
-                <legend>Bereich für neue Vokabeln</legend>
-                <span class="hint" style="margin:0 0 8px;">Leer lassen = automatisch aus Seitenköpfen und Überschriften erkennen (Unité, Volet, Module, Unit, Across cultures, Focus, Texts ...). Wenn du etwas einträgst, startet der Import in diesem Bereich.</span>
+                <legend>Kategorie für neue Vokabeln <button type="button" class="info-btn" data-info="Leer lassen: Die Kategorien werden aus Seitenköpfen und Überschriften erkannt (Unité, Volet, Module, Unit, Across cultures, Focus, Texts ...). Wenn du etwas einträgst, wird dort begonnen. Soll alles in diese Kategorie, schalte die automatische Erkennung unten ab. Es gibt bis zu 3 Ebenen." aria-label="Information" aria-expanded="false">i</button></legend>
                 <div class="path-grid">
                     <label class="field"><span>Ebene 1 (z. B. Unité 1)</span><input type="text" id="path-1" list="dl-1" autocomplete="off"></label>
                     <label class="field"><span>Ebene 2 (z. B. Volet 2)</span><input type="text" id="path-2" list="dl-2" autocomplete="off"></label>
                     <label class="field"><span>Ebene 3 (optional)</span><input type="text" id="path-3" list="dl-3" autocomplete="off"></label>
                 </div>
-                <label class="check"><input type="checkbox" id="autodetect" checked> Bereiche automatisch erkennen</label>
+                <label class="check"><input type="checkbox" id="autodetect" checked> Kategorien automatisch erkennen</label>
             </fieldset>
 
             <label class="upload-zone" for="file-input" id="upload-zone" tabindex="0">
-                <strong>Screenshots auswählen</strong>
-                <span class="hint">Mehrere Bilder möglich, Doppelseiten werden automatisch geteilt. Bilder auch per Drag &amp; Drop.</span>
+                <strong>Screenshots oder Fotos auswählen</strong>
+                <span class="hint">PNG, JPEG und andere Bildformate, mehrere Bilder möglich, auch per Drag &amp; Drop</span>
                 <span class="preview-container" id="preview-box"></span>
             </label>
             <input type="file" id="file-input" class="sr-only" accept="image/*" multiple>
             <button type="button" id="camera-btn" class="block nav-btn">Seiten mit der Kamera aufnehmen</button>
             <input type="file" id="cam-input" class="sr-only" accept="image/*" capture="environment">
-            <label class="check"><input type="checkbox" id="autofix" checked> Automatische Korrektur (Wörterbuch &amp; Kontext)</label>
-            <label class="check"><input type="checkbox" id="autosplit" checked> Doppelseiten automatisch teilen (bei einer einzelnen Seite im Querformat abschalten)</label>
+            <label class="check"><input type="checkbox" id="autofix" checked> Automatische Korrektur
+                <button type="button" class="info-btn" data-info="Korrigiert Lesefehler mit Wörterbuch und Kontext (z. B. rn statt m, fehlende Akzente) und schlägt fehlende Lücken-Lösungen vor. Geänderte Einträge sind markiert." aria-label="Information" aria-expanded="false">i</button></label>
+            <label class="check"><input type="checkbox" id="autosplit" checked> Doppelseiten automatisch teilen
+                <button type="button" class="info-btn" data-info="Bilder im Querformat mit zwei Buchseiten werden in der Mitte geteilt. Bei einer einzelnen Seite im Querformat abschalten." aria-label="Information" aria-expanded="false">i</button></label>
 
-            <details class="manual" style="margin-top:16px;">
+            <details class="manual" id="manual-box" style="margin-top:16px;">
                 <summary>Vokabel manuell hinzufügen</summary>
                 <form id="manual-form">
                     <label class="field"><span id="m-term-label">Französisch</span><input type="text" id="m-term" autocomplete="off" required></label>
                     <label class="field"><span>Deutsch</span><input type="text" id="m-de" autocomplete="off" required></label>
-                    <label class="field"><span>Beispielsatz (optional; Lücke mit _____ markieren)</span><input type="text" id="m-sent" autocomplete="off"></label>
-                    <label class="field"><span>Lücken-Lösung(en), bei mehreren mit ; trennen (optional)</span><input type="text" id="m-gaps" autocomplete="off"></label>
+                    <label class="field"><span>Beispielsatz (optional) <button type="button" class="info-btn" data-info="Die Lücke im Satz mit _____ markieren. Die Lösung(en) trägst du im nächsten Feld ein, mehrere mit Semikolon trennen." aria-label="Information" aria-expanded="false">i</button></span><input type="text" id="m-sent" autocomplete="off"></label>
+                    <label class="field"><span>Lücken-Lösung(en) (optional)</span><input type="text" id="m-gaps" autocomplete="off"></label>
                     <button type="submit" class="block nav-btn">Hinzufügen</button>
                 </form>
             </details>
         </div>
+
+        <!-- EINSTELLUNGEN -->
+        <div id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+            <h2>Einstellungen</h2>
+
+            <section class="set-group" aria-labelledby="set-phases">
+                <h3 id="set-phases">Lernphasen <button type="button" class="info-btn" data-info="Abstand in Tagen, bis eine Vokabel in der jeweiligen Phase wieder abgefragt wird. 0 bedeutet sofort. Richtig = nächste Phase, falsch = zurück." aria-label="Information" aria-expanded="false">i</button></h3>
+                <div class="iv-grid">
+                    <label class="field"><span>Phase 1 (Tage)</span><input type="number" id="iv-1" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 2 (Tage)</span><input type="number" id="iv-2" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 3 (Tage)</span><input type="number" id="iv-3" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 4 (Tage)</span><input type="number" id="iv-4" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 5 (Tage)</span><input type="number" id="iv-5" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 6 (Tage)</span><input type="number" id="iv-6" min="0" max="365" inputmode="numeric"></label>
+                </div>
+                <label class="field"><span>Bei einem Fehler</span>
+                    <select id="set-wrong">
+                        <option value="reset">Zurück in Phase 1</option>
+                        <option value="back">Nur eine Phase zurück</option>
+                    </select>
+                </label>
+            </section>
+
+            <section class="set-group" aria-labelledby="set-goal-title">
+                <h3 id="set-goal-title">Tagesziel <button type="button" class="info-btn" data-info="So viele Vokabeln willst du pro Tag abfragen. Der Fortschrittsbalken auf der Startseite zeigt es an." aria-label="Information" aria-expanded="false">i</button></h3>
+                <label class="field"><span>Abfragen pro Tag</span><input type="number" id="set-goal" min="1" max="500" inputmode="numeric"></label>
+            </section>
+
+            <section class="set-group" aria-labelledby="set-remind">
+                <h3 id="set-remind">Erinnerung <button type="button" class="info-btn" data-info="Eine Benachrichtigung zur gewählten Uhrzeit, wenn Vokabeln fällig sind (höchstens einmal pro Tag). Braucht ein Konto. Auf dem iPhone nur in der installierten App." aria-label="Information" aria-expanded="false">i</button></h3>
+                <span id="push-info" class="hint" role="status" aria-live="polite"></span>
+                <label class="field"><span>Uhrzeit</span><input type="time" id="set-time" value="18:00"></label>
+                <button type="button" id="push-toggle" class="block nav-btn" data-state="off">Benachrichtigungen einschalten</button>
+                <button type="button" id="push-test" class="block secondary" disabled>Testnachricht senden</button>
+            </section>
+
+            <section class="set-group" aria-labelledby="set-data">
+                <h3 id="set-data">Daten <button type="button" class="info-btn" data-info="Die Sicherung ist eine Datei mit allen Vokabeln, Phasen und Prüfungen. Mit „Lücken-Lösungen vorschlagen“ ergänzt das Wörterbuch fehlende Lösungen bei französischen Lückensätzen." aria-label="Information" aria-expanded="false">i</button></h3>
+                <div class="tools">
+                    <button type="button" id="export-btn" class="secondary">Sicherung speichern</button>
+                    <button type="button" id="import-btn" class="secondary">Sicherung laden</button>
+                    <button type="button" id="gaps-fill-btn" class="secondary">Lücken-Lösungen vorschlagen</button>
+                    <button type="button" id="clear-btn" class="danger" hidden>Liste leeren</button>
+                </div>
+                <input type="file" id="import-input" class="sr-only" accept="application/json,.json">
+            </section>
+
+            <button type="button" id="settings-reset" class="mini secondary">Alle Einstellungen auf Standard</button>
+        </div>
     </section>
 
-    <!-- TRAINER -->
+    <!-- ABFRAGE -->
     <section id="trainer-screen" hidden>
         <span class="phase-badge" id="phase-title">Abfrage</span>
         <div class="word-display" id="question-display">-</div>
@@ -391,17 +445,19 @@
         <button type="button" id="action-btn" class="block">Antwort prüfen</button>
         <div class="feedback" id="feedback-display" role="status" aria-live="polite"></div>
         <div class="stats-info" id="stats-display"></div>
-
-        <!-- Karteikarte: nur im Übungsmodus und nur für Vokabeln in Phase 1 -->
-        <div id="flashcard-box" class="flashcard-box" hidden>
-            <button type="button" id="flashcard" class="flashcard" data-flipped="0" aria-pressed="false">
-                <span id="fc-front" class="fc-side">Karteikarte: Tippen zum Umdrehen und die Auflösung ansehen</span>
-                <span id="fc-back" class="fc-side" hidden></span>
-            </button>
-            <span class="hint">Wenn du die Karte ansiehst, zählt die Vokabel als geübt, aber noch nicht als gekonnt. Sie kommt danach noch einmal.</span>
-        </div>
-
         <button type="button" id="quit-btn" class="link-btn">Abbrechen und zurück</button>
+    </section>
+
+    <!-- KARTEIKARTEN (Übungsmodus) -->
+    <section id="card-screen" hidden>
+        <span class="phase-badge" id="card-title">Karteikarten</span>
+        <button type="button" id="flashcard" class="flashcard" data-flipped="0" aria-pressed="false">
+            <span id="fc-label" class="fc-label"></span>
+            <span id="fc-text" class="fc-text"></span>
+        </button>
+        <div class="stats-info" id="card-progress" role="status" aria-live="polite"></div>
+        <button type="button" id="card-next" class="block nav-btn" hidden>Weiter</button>
+        <button type="button" id="card-quit" class="link-btn">Abbrechen und zurück</button>
     </section>
 
     <!-- ENDE -->
@@ -425,10 +481,52 @@
             <label class="check-row"><input type="radio" name="qmode" value="gap"><span id="mo-gap"></span></label>
             <label class="check-row"><input type="radio" name="qmode" value="mixed"><span id="mo-mixed"></span></label>
         </fieldset>
-        <span class="hint">Vokabeln ohne Lückentext werden beim Lückentext normal abgefragt.</span>
-        <label class="check" style="margin-top:14px;"><input type="checkbox" id="mode-practice"> Übungsmodus: Karteikarte zum Umdrehen für Vokabeln in Phase 1</label>
+        <label class="check"><input type="checkbox" id="mode-practice"> Übungsmodus (Karteikarten vorab)
+            <button type="button" class="info-btn" data-info="Zeigt zuerst alle Vokabeln in Phase 1 als Karteikarten: Karte umdrehen (Tippen oder Enter), dann weiter (Tippen, Button oder Enter). Ohne Wertung. Danach folgt die normale Abfrage." aria-label="Information" aria-expanded="false">i</button></label>
         <button type="submit" class="block nav-btn">Starten</button>
         <button type="button" id="mode-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
+
+<!-- Prüfung anlegen / bearbeiten -->
+<dialog id="exam-dialog" class="mode-dialog" aria-labelledby="exam-title">
+    <form id="exam-form">
+        <h3 id="exam-title">Neue Prüfung</h3>
+        <label class="field"><span>Name</span><input type="text" id="ex-name" maxlength="60" autocomplete="off" required></label>
+        <label class="field"><span>Datum der Prüfung</span><input type="date" id="ex-date" required></label>
+        <div class="field"><span>Vokabeln (Kategorien) <button type="button" class="info-btn" data-info="Wähle die Kategorien, aus denen die Prüfung kommt. Einzelne Vokabeln fügst du später in den Listen mit „Auswählen“ und „Zur Prüfung“ hinzu." aria-label="Information" aria-expanded="false">i</button></span>
+            <div id="ex-cats"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="ex-affect"> Auch die Lernphasen anpassen
+            <button type="button" class="info-btn" data-info="Aus: Die Prüfungsübung zählt nur für diese Prüfung. An: Richtige und falsche Antworten verschieben die Vokabeln zusätzlich in den normalen Lernphasen." aria-label="Information" aria-expanded="false">i</button></label>
+        <p id="ex-msg" class="status" style="color:#c0392b;" role="alert" hidden></p>
+        <button type="submit" class="block nav-btn">Speichern</button>
+        <button type="button" id="ex-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
+
+<!-- Vokabeln zu einer Prüfung hinzufügen -->
+<dialog id="pick-dialog" class="mode-dialog" aria-labelledby="pick-title">
+    <form id="pick-form">
+        <h3 id="pick-title">Zu welcher Prüfung?</h3>
+        <label class="field"><span>Prüfung</span><select id="pick-exam"></select></label>
+        <button type="submit" class="block nav-btn">Hinzufügen</button>
+        <button type="button" id="pick-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
+
+<!-- Kategorie oder Vokabeln verschieben -->
+<dialog id="move-dialog" class="mode-dialog" aria-labelledby="mv-title">
+    <form id="move-form">
+        <h3 id="mv-title">Verschieben</h3>
+        <p style="margin:0 0 8px;">Ziel-Kategorie <button type="button" id="mv-info" class="info-btn" data-info="" aria-label="Information" aria-expanded="false">i</button></p>
+        <label class="field"><span class="sr-only">Bestehende Kategorie</span><select id="mv-existing"></select></label>
+        <label class="field"><span>Ebene 1</span><input type="text" id="mv-1" list="dl-1" autocomplete="off"></label>
+        <label class="field"><span>Ebene 2</span><input type="text" id="mv-2" list="dl-2" autocomplete="off"></label>
+        <label class="field"><span>Ebene 3</span><input type="text" id="mv-3" list="dl-3" autocomplete="off"></label>
+        <p id="mv-msg" class="status" style="color:#c0392b;" role="alert" hidden></p>
+        <button type="submit" class="block nav-btn">Verschieben</button>
+        <button type="button" id="mv-cancel" class="block secondary">Abbrechen</button>
     </form>
 </dialog>
 
@@ -442,6 +540,8 @@
         <button type="button" id="cam-cancel" class="secondary">Abbrechen</button>
     </div>
 </dialog>
+
+<div id="info-pop" class="info-pop" role="tooltip" hidden></div>
 
 <datalist id="dl-1"></datalist>
 <datalist id="dl-2"></datalist>
