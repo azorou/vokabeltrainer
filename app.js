@@ -14,6 +14,8 @@ const LANGS = {
 };
 const DEFAULT_SETTINGS = { intervals: [0, 1, 3, 7, 14, 30], onWrong: 'reset', dailyGoal: 20, reminderTime: '18:00' };
 const QMODES = ['translate', 'reverse', 'gap', 'mixed'];
+// Texte auf der Karteikarte (hier einfach ändern)
+const CARD_TEXT = { front: 'Tippen zum Umdrehen', back: 'Weiter mit Tippen oder Enter' };
 
 let account = null;
 let currentLang = 'fr';
@@ -28,21 +30,30 @@ let onlyWarn = false;
 let settings = { ...DEFAULT_SETTINGS, intervals: [...DEFAULT_SETTINGS.intervals] };
 let stats = { days: {} };
 
-let sessionKind = 'free';           // 'free' | 'daily' | 'trouble'
+let sessionKind = 'free';           // 'free' | 'daily' | 'trouble' | 'exam'
 let qChoice = 'translate';          // gewählte Frageart: translate | reverse | gap | mixed
-let practiceMode = false;           // Übungsmodus mit Karteikarte für Phase 1
+let practiceMode = false;           // Übungsmodus: vor der Abfrage Karteikarten für Vokabeln in Phase 1
 let pendingKind = null;
+let pendingExamId = null;
+let sessionExam = null;
+let exams = [];                     // Prüfungen: {id, name, date, ids, affect, progress}
+let selectMode = false;             // Auswahlmodus in den Listen
+const selectedIds = new Set();
+let moveCtx = null;
+let editingExamId = null;
+let exCatState = [];
+let cardList = [];
+let cardIndex = 0;
+let cardFlipped = false;
+let afterCards = null;
 let sessionPool = [];
 let sessionDone = new Set();
-let helpCount = new Map();
-let helpedItems = new Set();
 let activeList = [];
 let wrongAnswers = [];
 let roundQueue = [];
 let currentIndex = 0;
 let mode = 'translate';             // Modus der aktuellen Runde (freies Üben)
 let qMode = 'translate';            // Modus der aktuellen Frage
-let peeked = false;                 // Karteikarte wurde vor der Antwort umgedreht
 let isRetry = false;
 let isShowingResolution = false;
 let mistakeCount = 0;
@@ -115,17 +126,18 @@ function setStatus(msg, type = 'busy') {
     el.style.color = { busy: '#b9770e', ok: '#1e8449', error: '#c0392b' }[type];
 }
 function showScreen(name) {
-    ['login', 'main', 'trainer', 'end'].forEach((n) => { $(`${n}-screen`).hidden = n !== name; });
+    ['login', 'main', 'trainer', 'card', 'end'].forEach((n) => { $(`${n}-screen`).hidden = n !== name; });
 }
 function showTab(name) {
     currentTab = name;
-    ['learn', 'lists', 'add'].forEach((n) => {
+    ['learn', 'lists', 'add', 'settings'].forEach((n) => {
         $(`view-${n}`).hidden = n !== name;
         $(`tab-${n}`).setAttribute('aria-selected', String(n === name));
     });
     if (name === 'learn') renderLearn();
     else if (name === 'lists') renderLists();
-    else updatePathSuggest();
+    else if (name === 'add') updatePathSuggest();
+    else syncSettingsUI();
 }
 function refreshAll() {
     renderLearn();
@@ -218,6 +230,7 @@ function mergeStats(a, b) {
 
 /* ================= Daten bereinigen ================= */
 function sanitizePool(arr) {
+    const strs = (x) => (Array.isArray(x) ? x.map(String).slice(0, 20) : []);
     return (Array.isArray(arr) ? arr : []).map((v) => {
         if (!v) return null;
         const term = String(v.term ?? v.en ?? '').trim();   // v.en: Format der alten Version
@@ -226,16 +239,27 @@ function sanitizePool(arr) {
         let path = Array.isArray(v.path) ? v.path.map((p) => String(p).trim()).filter(Boolean).slice(0, 3) : [];
         const mi = path.findIndex((p, i) => i > 0 && /^module\s/i.test(p));
         if (mi > 0) path = path.slice(mi);                    // Module sind eigene Hauptbereiche
+        let lowc;
+        if (v.lowc && typeof v.lowc === 'object') {
+            const l = { term: strs(v.lowc.term), de: strs(v.lowc.de), sentence: strs(v.lowc.sentence) };
+            if (l.term.length || l.de.length || l.sentence.length) lowc = l;
+        }
         return {
             id: String(v.id || uid()),
             lang: v.lang === 'fr' ? 'fr' : 'en',
             term,
             de,
             sentence: normGapMarks(v.sentence || ''),
-            gaps: Array.isArray(v.gaps) ? v.gaps.map((g) => ({ n: Number.isFinite(g && g.n) ? g.n : null, a: String((g && g.a) || '') })) : [],
+            gaps: Array.isArray(v.gaps) ? v.gaps.map((g) => ({
+                n: Number.isFinite(g && g.n) ? g.n : null,
+                a: String((g && g.a) || ''),
+                auto: !!(g && g.auto),
+                alts: Array.isArray(g && g.alts) ? g.alts.map(String).slice(0, 12) : []
+            })) : [],
             path,
             fix: Array.isArray(v.fix) && v.fix.length ? v.fix : undefined,
             warn: Array.isArray(v.warn) && v.warn.length ? v.warn.map(String) : undefined,
+            lowc,
             phase: clampInt(v.phase, 1, 6, 1),
             due: Number(v.due) || 0,
             ok: Number(v.ok) || 0,
@@ -251,12 +275,63 @@ function rebuildProtected() {
 const isProtected = (w) => protectedWords.has(w) || confirmedWords.has(w);
 const addConfirmed = (text) => letters(text).forEach((w) => confirmedWords.add(w));
 
+/* ================= Prüfungen ================= */
+function sanitizeExams(arr) {
+    return (Array.isArray(arr) ? arr : []).map((x) => {
+        if (!x || !/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))) return null;
+        const progress = {};
+        if (x.progress && typeof x.progress === 'object') {
+            Object.keys(x.progress).forEach((k) => {
+                const p = x.progress[k] || {};
+                progress[k] = { ok: clampInt(p.ok, 0, 9999, 0), bad: clampInt(p.bad, 0, 9999, 0), streak: clampInt(p.streak, 0, 99, 0), due: Number(p.due) || 0 };
+            });
+        }
+        return {
+            id: String(x.id || uid()),
+            name: String(x.name || 'Prüfung').slice(0, 60),
+            date: String(x.date),
+            ids: Array.isArray(x.ids) ? [...new Set(x.ids.map(String))] : [],
+            affect: !!x.affect,
+            progress
+        };
+    }).filter(Boolean);
+}
+/** Tage bis zur Prüfung (0 = heute, negativ = vorbei) */
+function examDays(exam) {
+    const a = new Date();
+    a.setHours(0, 0, 0, 0);
+    const [y, m, d] = exam.date.split('-').map(Number);
+    return Math.round((new Date(y, m - 1, d) - a) / 86400000);
+}
+const fmtDate = (iso) => { const [y, m, d] = iso.split('-'); return `${d}.${m}.${y}`; };
+function examItems(exam) {
+    const set = new Set(exam.ids);
+    return vocabularyPool.filter((v) => set.has(v.id));
+}
+function examDueItems(exam) {
+    const now = Date.now();
+    return examItems(exam).filter((v) => { const p = exam.progress[v.id]; return !p || p.due <= now; });
+}
+/** Eigene Wiederholungsplanung der Prüfung: Schwache Vokabeln kommen täglich, sichere seltener, alle spätestens am Tag vor der Prüfung */
+function examSchedule(exam, item, correct) {
+    const p = exam.progress[item.id] || (exam.progress[item.id] = { ok: 0, bad: 0, streak: 0, due: 0 });
+    if (correct) { p.ok++; p.streak++; } else { p.bad++; p.streak = 0; }
+    const days = examDays(exam);
+    const ladder = [0, 1, 2, 3, 5, 7];
+    let interval = ladder[Math.min(p.streak, ladder.length - 1)];
+    if (days <= 3) interval = Math.min(interval, 1);
+    if (days <= 0) interval = 0;
+    let due = dueTs(interval);
+    if (days > 1) { const last = dueTs(days - 1); if (due > last) due = last; }
+    p.due = correct ? due : Date.now();
+}
+
 /* ================= Konten & Speicherung (Supabase) ================= */
 const SUPABASE_URL = 'https://tjdgptcdlaaonuiogbzn.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_3qPEGh16ss9PzCWpJjuAeQ_zxwTPupX';
 const AUTH_DOMAIN = 'vokabeltrainer.app';   // nur für die interne Pseudo-E-Mail, es wird nie eine Mail versendet
 // Öffentlicher VAPID-Schlüssel für Erinnerungen (aus Schritt 1 der Push-Einrichtung). Solange hier der Platzhalter steht, ist Push aus.
-const VAPID_PUBLIC_KEY = 'BK95iNp0UlKjdo4rd3JeZDbudKwgFD3Mka5SJ1bKObFW1zPRw2D9rcu3IKpqsnsvtJ1yuwj29HEHphJRYr0gf3Y';
+const VAPID_PUBLIC_KEY = 'HIER_DEN_OEFFENTLICHEN_SCHLUESSEL_EINTRAGEN';
 const sb = (window.supabase && window.supabase.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
@@ -281,11 +356,12 @@ function setSync(state) {
 }
 
 const dataKey = () => `vokabeltrainer.data.v2.${account.guest ? 'guest' : account.id}`;
-const payload = () => ({ v: 3, pool: vocabularyPool, confirmed: [...confirmedWords], settings, stats });
+const payload = () => ({ v: 4, pool: vocabularyPool, confirmed: [...confirmedWords], settings, stats, exams });
 
 function applyPayloadExtras(data) {
     settings = sanitizeSettings(data && data.settings);
     stats = sanitizeStats(data && data.stats);
+    exams = sanitizeExams(data && data.exams);
 }
 
 function writeCache() {
@@ -416,6 +492,7 @@ async function resolveConflict() {
                     });
                     (d.confirmed || []).forEach((w) => confirmedWords.add(String(w)));
                     stats = mergeStats(stats, sanitizeStats(d.stats));
+                    sanitizeExams(d.exams).forEach((x) => { if (!exams.some((e) => e.id === x.id)) exams.push(x); });
                 }
                 syncMeta.base = row.updated_at;
                 syncMeta.dirty = true;
@@ -503,6 +580,7 @@ async function logout() {
     account = null;
     vocabularyPool = [];
     confirmedWords.clear();
+    exams = [];
     syncMeta = { base: null, dirty: false };
     $('conflict-box').hidden = true;
     showScreen('login');
@@ -580,6 +658,7 @@ async function importBackup(file) {
         (data.confirmed || []).forEach((w) => confirmedWords.add(String(w)));
         if (data.settings) settings = sanitizeSettings(data.settings);
         if (data.stats) stats = mergeStats(stats, sanitizeStats(data.stats));
+        sanitizeExams(data.exams).forEach((x) => { if (!exams.some((e) => e.id === x.id)) exams.push(x); });
         rebuildProtected();
         savePool();
         syncSettingsUI();
@@ -807,28 +886,32 @@ function adaptSentence(e, sentConf, notes) {
 }
 
 /** Anzahl und Durchschnitt unsicher erkannter Wörter eines Feldes */
-function lowConf(text, map, thr) {
-    let n = 0, total = 0, sum = 0;
-    letters(text).forEach((w) => {
-        if (w.length < 3 || SKIP_WORDS.has(w) || map[w] === undefined) return;
-        total++;
-        sum += map[w];
-        if (map[w] < thr) n++;
-    });
-    return { n, total, avg: total ? sum / total : 100 };
+/** Hinweise, die der Nutzer prüfen sollte (unsicher gelesen, unbekannte Wörter, fehlende Lücken-Nummern) */
+/** unsicher gelesene Wörter eines Feldes (Erkennungssicherheit unter der Schwelle, mit Wörterbuch auch unbekannte Wörter) */
+function lowWords(text, map, thr, lang, proper, useProtected) {
+    const out = new Set();
+    const re = /\p{L}+/gu;
+    let m;
+    while ((m = re.exec(text))) {
+        const tok = m[0];
+        const w = tok.toLowerCase();
+        if (w.length < 3 || SKIP_WORDS.has(w)) continue;
+        const c = map[w];
+        if (c === undefined) continue;
+        if (c < thr) { out.add(w); continue; }
+        if (lang && dicts[lang] && c < 85 && !(proper && m.index > 0 && tok[0] !== w[0])
+            && !isKnown(w, lang) && !(useProtected && isProtected(w))) out.add(w);
+    }
+    return [...out];
 }
 
-/** Hinweise, die der Nutzer prüfen sollte (unsicher gelesen, unbekannte Wörter, fehlende Lücken-Nummern) */
-function computeWarnings(e, confs, lang) {
+/** Hinweise, die der Nutzer prüfen sollte */
+function computeWarnings(e, lang) {
     const w = [];
-    if (lowConf(e.term, confs.term, 60).n >= 1) w.push('Stichwort unsicher gelesen');
-    const d = lowConf(e.de, confs.de, 55);
-    if (d.n >= 2 || (d.total >= 2 && d.avg < 65)) w.push('Übersetzung unsicher gelesen');
-    if (lowConf(e.sentence, confs.sent, 50).n >= 2) w.push('Satz unsicher gelesen');
-    if (dicts[lang]) {
-        const unk = letters(e.term).filter((x) => x.length >= 4 && !SKIP_WORDS.has(x) && !isKnown(x, lang));
-        if (unk.length) w.push(`Stichwort enthält ein unbekanntes Wort (${unk.join(', ')})`);
-    }
+    const L = e.lowc || {};
+    if (L.term && L.term.length) w.push(`Stichwort unsicher gelesen (${L.term.join(', ')})`);
+    if (L.de && L.de.length >= 2) w.push(`Übersetzung unsicher gelesen (${L.de.slice(0, 4).join(', ')})`);
+    if (L.sentence && L.sentence.length >= 2) w.push(`Satz unsicher gelesen (${L.sentence.slice(0, 4).join(', ')})`);
     if (lang === 'en' && e.sentence) {
         const stem = stemOf(coreWord(e.term));
         if (stem.length >= 3 && !letters(e.sentence).some((t) => t.startsWith(stem))) w.push('Das Stichwort kommt im Satz nicht vor');
@@ -863,7 +946,14 @@ function refineEntry(e, confs, lang) {
         e.sentence = dictCorrect(e.sentence, lang, confs.sent, 'Satz', notes, true, stem);
     }
     if (notes.length) e.fix = notes;
-    const warn = computeWarnings(e, confs, lang);
+    // unsicher gelesene Wörter merken (werden in den Listen markiert)
+    const low = {
+        term: lowWords(e.term, confs.term, 65, lang, false, false),
+        de: lowWords(e.de, confs.de, 60, 'de', false, true),
+        sentence: lowWords(e.sentence, confs.sent, 55, lang, true, true)
+    };
+    if (low.term.length || low.de.length || low.sentence.length) e.lowc = low;
+    const warn = computeWarnings(e, lang);
     if (warn.length) e.warn = warn;
     return e;
 }
@@ -1023,7 +1113,8 @@ function normalizeCanvas(canvas) {
 }
 
 /** Für Fotos mit Schatten oder ungleichmäßigem Licht: jeden Bereich auf seinen eigenen Hintergrund beziehen */
-function normalizeLocal(canvas) {
+/** Karte des Papier-Hintergrunds (hellster Wert der Umgebung, Text ist dunkler als das Papier) */
+function bgMap(canvas) {
     const w = canvas.width, h = canvas.height;
     const tw = Math.max(8, Math.round(w / 24)), th = Math.max(8, Math.round(h / 24));
     const small = document.createElement('canvas');
@@ -1035,7 +1126,6 @@ function normalizeLocal(canvas) {
     const sd = sctx.getImageData(0, 0, tw, th).data;
     const lum = new Float32Array(tw * th);
     for (let i = 0; i < lum.length; i++) lum[i] = lumOf(sd[i * 4], sd[i * 4 + 1], sd[i * 4 + 2]);
-    // Hintergrund = hellster Wert der Umgebung (Text ist dunkler als das Papier)
     const R = 3;
     const bgS = new Float32Array(tw * th);
     for (let y = 0; y < th; y++) {
@@ -1050,6 +1140,20 @@ function normalizeLocal(canvas) {
             bgS[y * tw + x] = m;
         }
     }
+    return { bgS, tw, th, small, sctx };
+}
+/** Ungleichmäßiges Licht (Schatten, Verlauf): Format spielt keine Rolle, es wird das Bild selbst gemessen */
+function isUneven(canvas) {
+    const { bgS } = bgMap(canvas);
+    const vals = Array.from(bgS).sort((a, b) => a - b);
+    const lo = vals[Math.floor(vals.length * 0.05)];
+    const hi = vals[Math.floor(vals.length * 0.95)];
+    return hi - lo > 32;
+}
+/** Jeden Bereich auf seinen eigenen Hintergrund beziehen */
+function normalizeLocal(canvas) {
+    const w = canvas.width, h = canvas.height;
+    const { bgS, tw, th, small, sctx } = bgMap(canvas);
     const bgImg = sctx.createImageData(tw, th);
     for (let i = 0; i < bgS.length; i++) {
         bgImg.data[i * 4] = bgImg.data[i * 4 + 1] = bgImg.data[i * 4 + 2] = bgS[i];
@@ -1078,6 +1182,82 @@ function normalizeLocal(canvas) {
         d[o + 3] = 255;
     }
     ctx.putImageData(src, 0, 0);
+}
+
+/** UK-Flaggen (französische Seiten) finden: kleine Fenster mit viel Marineblau und etwas Rot. Gibt Rechtecke {x, y, w, h} zurück */
+function findFlags(d, w, h, refW = w) {
+    const W1 = w + 1;
+    const red = new Uint32Array(W1 * (h + 1));
+    const navy = new Uint32Array(W1 * (h + 1));
+    for (let y = 0; y < h; y++) {
+        let rr = 0, nn = 0;
+        for (let x = 0; x < w; x++) {
+            const o = (y * w + x) * 4;
+            const r = d[o], g = d[o + 1], b = d[o + 2];
+            if (r > 150 && g < 90 && b < 100 && r - g > 80) rr++;
+            else if (b > 70 && b < 175 && r < 60 && g < 85 && b - r > 50) nn++;
+            const i = (y + 1) * W1 + (x + 1);
+            red[i] = red[i - W1] + rr;
+            navy[i] = navy[i - W1] + nn;
+        }
+    }
+    const fw = Math.max(16, Math.round(refW * 0.03));        // Flaggenbreite relativ zur Seitenbreite
+    const fh = Math.max(10, Math.round(fw * 0.6));
+    const step = Math.max(2, Math.floor(fh / 3));
+    const area = fw * fh;
+    const sum = (arr, x, y) => arr[(y + fh) * W1 + (x + fw)] - arr[y * W1 + (x + fw)] - arr[(y + fh) * W1 + x] + arr[y * W1 + x];
+    const rects = [];
+    for (let y = 0; y + fh <= h; y += step) {
+        for (let x = 0; x + fw <= w; x += step) {
+            if (sum(navy, x, y) < area * 0.22 || sum(red, x, y) < area * 0.05) continue;
+            const hit = { x, y, w: fw, h: fh };
+            const near = rects.find((r) => hit.x < r.x + r.w + fw / 2 && hit.x + hit.w > r.x - fw / 2 && hit.y < r.y + r.h + fh / 2 && hit.y + hit.h > r.y - fh / 2);
+            if (near) {
+                const x0 = Math.min(near.x, hit.x), y0 = Math.min(near.y, hit.y);
+                const x1 = Math.max(near.x + near.w, hit.x + hit.w), y1 = Math.max(near.y + near.h, hit.y + hit.h);
+                near.x = x0; near.y = y0; near.w = x1 - x0; near.h = y1 - y0;
+            } else rects.push(hit);
+        }
+    }
+    return rects;
+}
+/** Flagge und das daneben stehende englische Wort übermalen */
+function maskFlags(ctx, w, h) {
+    const rw = Math.round(w * 0.45);                           // Flaggen stehen links neben den Stichwörtern
+    const d = ctx.getImageData(0, 0, rw, h).data;
+    const flags = findFlags(d, rw, h, w);
+    ctx.fillStyle = '#ffffff';
+    flags.forEach((f) => {
+        const x0 = Math.max(0, f.x - 4);
+        const y0 = Math.max(0, f.y - Math.round(f.h * 0.3));
+        const x1 = Math.min(w, f.x + f.w + Math.round(f.w * 6.5));
+        const y1 = Math.min(h, f.y + Math.round(f.h * 1.3));
+        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    });
+    return flags.length;
+}
+
+/** Bild laden; Formate, die createImageBitmap nicht kennt, werden über ein Bildelement geladen und intern in ein Canvas umgewandelt */
+async function loadBitmap(file) {
+    try {
+        return await createImageBitmap(file);
+    } catch (e) { /* weiter mit Bildelement */ }
+    const url = URL.createObjectURL(file);
+    try {
+        const img = await new Promise((resolve, reject) => {
+            const i = new Image();
+            i.onload = () => resolve(i);
+            i.onerror = () => reject(new Error('Dieses Bildformat wird vom Browser nicht unterstützt. Bitte als PNG oder JPEG speichern.'));
+            i.src = url;
+        });
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0);
+        return await createImageBitmap(c);
+    } finally {
+        URL.revokeObjectURL(url);
+    }
 }
 
 /** Leichtes Nachschärfen nach dem Hochskalieren (macht Buchstabenkanten klarer) */
@@ -1154,9 +1334,9 @@ function rotateCanvas(canvas, deg) {
 }
 
 /** Ein Bild ergibt 1 oder 2 Seiten (Doppelseiten werden geteilt) */
-async function preparePages(file) {
-    const photo = /jpe?g/i.test(file.type || '') || /\.jpe?g$/i.test(file.name || '');
-    const bmp = await createImageBitmap(file);
+/** Ein Bild ergibt 1 oder 2 Seiten (Doppelseiten werden geteilt). Alle Formate (PNG, JPEG, WebP ...) werden gleich behandelt. */
+async function preparePages(file, lang) {
+    const bmp = await loadBitmap(file);
     try {
         const splitEl = $('autosplit');
         const allowSplit = !splitEl || splitEl.checked;
@@ -1167,19 +1347,20 @@ async function preparePages(file) {
         }
         const pages = [];
         let boxes = 0;
+        let flags = 0;
         for (const [x, w] of rects) {
             let canvas = canvasFromBitmap(bmp, x, 0, w, bmp.height, 2200);
-            if (photo) {
-                const skew = estimateSkew(canvas);
-                if (skew) canvas = rotateCanvas(canvas, skew);
-            }
+            const skew = estimateSkew(canvas);
+            if (skew) canvas = rotateCanvas(canvas, skew);
             const header = extractHeader(canvas);
-            boxes += maskGreenBoxes(canvas.getContext('2d', { willReadFrequently: true }), canvas.width, canvas.height);
-            if (photo) normalizeLocal(canvas); else normalizeCanvas(canvas);
-            sharpenCanvas(canvas, photo ? 0.5 : 0.6);
+            const cctx = canvas.getContext('2d', { willReadFrequently: true });
+            boxes += maskGreenBoxes(cctx, canvas.width, canvas.height);
+            if (lang === 'fr') flags += maskFlags(cctx, canvas.width, canvas.height);
+            if (isUneven(canvas)) normalizeLocal(canvas); else normalizeCanvas(canvas);
+            sharpenCanvas(canvas, 0.55);
             pages.push({ canvas, header });
         }
-        return { pages, boxes };
+        return { pages, boxes, flags };
     } finally {
         bmp.close();
     }
@@ -1193,7 +1374,7 @@ function makeContext() {
 }
 
 async function handleBatchUpload(files) {
-    files = [...files].filter((f) => f.type.startsWith('image/'));
+    files = [...files].filter((f) => (f.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|heic|heif|tiff?)$/i.test(f.name || ''));
     if (!files.length || isScanning) return;
     if (typeof Tesseract === 'undefined') {
         setStatus('Fehler: Texterkennung konnte nicht geladen werden (Internet prüfen).', 'error');
@@ -1213,7 +1394,7 @@ async function handleBatchUpload(files) {
 
     const ctx = makeContext();
     let step = '';
-    let failed = 0, added = 0, solved = 0, boxes = 0;
+    let failed = 0, added = 0, solved = 0, boxes = 0, flags = 0, suggested = 0;
     let worker;
     try {
         worker = await Tesseract.createWorker(L.ocr, 1, {
@@ -1226,8 +1407,9 @@ async function handleBatchUpload(files) {
             step = `Bild ${i + 1}/${files.length}`;
             setStatus(`Bereite ${step} vor...`);
             try {
-                const prep = await preparePages(files[i]);
+                const prep = await preparePages(files[i], lang);
                 boxes += prep.boxes;
+                flags += prep.flags;
                 for (let p = 0; p < prep.pages.length; p++) {
                     const page = prep.pages[p];
                     step = `Bild ${i + 1}/${files.length}${prep.pages.length > 1 ? `, Seite ${p + 1}/${prep.pages.length}` : ''}`;
@@ -1236,7 +1418,7 @@ async function handleBatchUpload(files) {
                     if (page.header) {
                         try { headerText = (await worker.recognize(page.header)).data.text || ''; } catch (e) { /* ohne Seitenkopf weiter */ }
                     }
-                    const res = parsePage(data.words || [], page.canvas.width, headerText, ctx, lang);
+                    const res = parsePage(data.words || [], page.canvas.width, headerText, ctx, lang, page.canvas.height);
                     added += addEntries(res.entries, lang);
                     solved += applySolutions(res.solutions, lang);
                 }
@@ -1254,13 +1436,14 @@ async function handleBatchUpload(files) {
         if (worker) await worker.terminate();
     }
 
+    if (lang === 'fr' && autofixOn() && dicts.fr) suggested = fillGapSuggestions('fr');
     isScanning = false;
     refreshAll();
     const dictNote = autofixOn() && L.dict.some((l) => !dictState[l]) ? ' Wörterbuch nicht vollständig geladen, Korrektur eingeschränkt.' : '';
     const warnN = vocabularyPool.filter((v) => v.lang === lang && v.warn && v.warn.length).length;
     if (added) {
         const areas = [...ctx.seen].slice(0, 6).join(', ') || 'keine erkannt';
-        setStatus(`${added} neue Vokabeln erkannt${solved ? `, ${solved} Lücken-Lösungen zugeordnet` : ''}${boxes ? `, ${boxes} Kasten entfernt` : ''}${failed ? `, ${failed} Bild(er) fehlgeschlagen` : ''}. Bereiche: ${areas}.${dictNote}${warnN ? ` ${warnN} Einträge sind als „Bitte prüfen“ markiert (unter „Listen“ filterbar).` : ''}`, 'ok');
+        setStatus(`${added} neue Vokabeln erkannt${solved ? `, ${solved} Lücken-Lösungen zugeordnet` : ''}${boxes ? `, ${boxes} Kasten entfernt` : ''}${flags ? `, ${flags} Flaggen entfernt` : ''}${suggested ? `, ${suggested} Lücken-Lösungen vorgeschlagen` : ''}${failed ? `, ${failed} Bild(er) fehlgeschlagen` : ''}. Bereiche: ${areas}.${dictNote}${warnN ? ` ${warnN} Einträge sind als „Bitte prüfen“ markiert (unter „Listen“ filterbar).` : ''}`, 'ok');
     } else {
         setStatus(`Keine neuen Vokabeln erkannt${failed ? ` (${failed} Bild(er) fehlgeschlagen)` : ''}. Prüfe, ob die richtige Sprache oben gewählt ist, und nutze gut lesbare Seiten mit 3 Spalten.`, 'error');
     }
@@ -1297,8 +1480,18 @@ function applySolutions(solutions, lang) {
         vocabularyPool.forEach((v) => {
             if (v.lang !== lang || v.path.join(' › ') !== key) return;
             v.gaps.forEach((g) => {
-                if (!g.a && g.n != null && map[g.n]) { g.a = map[g.n]; n++; }
+                if ((g.a && !g.auto) || g.n == null || !map[g.n]) return;     // automatische Vorschläge dürfen überschrieben werden
+                let a = map[g.n];
+                if (lang === 'fr' && dicts.fr) a = dictCorrect(a, 'fr', {}, 'Lösung', [], false, '');
+                g.a = a;
+                g.auto = false;
+                g.alts = [];
+                n++;
             });
+            if (v.warn && !v.gaps.some((g) => g.auto)) {
+                v.warn = v.warn.filter((x) => x !== AUTO_MSG);
+                if (!v.warn.length) v.warn = undefined;
+            }
         });
     });
     if (n) savePool();
@@ -1451,14 +1644,15 @@ function convertGaps(sentence) {
             continue;
         }
         lastNoNum = null;
-        const m = t.match(/^((?:\S*?['’])?)([-–—‑−]+)([⁰¹²³⁴⁵⁶⁷⁸⁹]+|\d{1,2})?([.,;:!?»”)"]*)$/);
+        // Lückenzeichen: Bindestrich, Gedankenstrich oder Tilde, danach oft die hochgestellte Nummer
+        const m = t.match(/^((?:\S*?['’])?)([-–—‑−~˜∼]+)([⁰¹²³⁴⁵⁶⁷⁸⁹]+|\d{1,2})?([.,;:!?»”)"]*)$/);
         if (m) {
             const [, prefix, dashes, num, trail] = m;
-            const plain = /^[-‑−]+$/.test(dashes);
+            const plain = /^[-‑−~˜∼]+$/.test(dashes);
             const prevEnds = i === 0 || /[.?!»"”:]$/.test(toks[i - 1]);
             // Ein alleinstehender Gedankenstrich (– / —) am Satzanfang oder nach Satzende ist ein Dialogstrich, keine Lücke
             if (num || plain || prefix || !prevEnds) {
-                const gap = { n: num ? supToNum(num) : null, a: '' };
+                const gap = { n: num ? supToNum(num) : null, a: '', auto: false, alts: [] };
                 gaps.push(gap);
                 if (!num) lastNoNum = gap;
                 out.push(`${prefix}${GAP}${trail}`);
@@ -1468,6 +1662,66 @@ function convertGaps(sentence) {
         out.push(t);
     }
     return { text: fixPunct(out.join(' ')), gaps };
+}
+
+/** "hier:" (auch als "hier." erkannt), Verweise wie "▶ Verbes, p. 158" und Konjugationshinweise weglassen */
+function cleanGerman(s) {
+    return s
+        .replace(/(^|[;,]\s*|\.\s+)hier\s*[:.;,]\s*/gi, '$1')
+        .replace(/\s*[▶►]\s*[^;]*$/u, '')
+        .replace(/\s*[▶►]?\s*\p{Lu}\p{L}+,\s*p\.\s*\d+\s*$/u, '')
+        .replace(/\bwird wie \p{L}+ konjugiert\b/giu, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[\s;,.:]+|[\s;,.:]+$/g, '')
+        .trim();
+}
+
+const ABBR = new Set(['jdn', 'jdm', 'jmdn', 'jmdm', 'jmd', 'etw', 'usw', 'bzw', 'ca', 'sth', 'sb', 'etc', 'fr', 'lat', 'pl', 'sg', 'adj', 'adv',
+    'vs', 'nr', 'dr', 'mr', 'mrs', 'ms', 'st', 'bspw', 'ggf', 'evtl', 'inkl', 'vgl', 'sog', 'od', 'gen', 'dat', 'akk', 'konj', 'inf', 'tel', 'str']);
+/** Punkt und Komma besser unterscheiden: Ein Punkt mitten im Satz vor einem Kleinbuchstaben ist ein Komma, ein Komma am Satzende ein Punkt */
+function fixPeriodsCommas(s, kind) {
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c !== '.' && c !== ',') { out += c; continue; }
+        const prev = s[i - 1] || '';
+        const next = s[i + 1] || '';
+        if (c === '.') {
+            if (next === '.' || prev === '.') { out += c; continue; }                       // Auslassungspunkte
+            if (/\d/.test(prev) && /\d/.test(next)) { out += c; continue; }                  // Dezimalzahl
+            const word = ((s.slice(0, i).match(/(\p{L}+)$/u)) || [])[1] || '';
+            const lw = word.toLowerCase();
+            if (ABBR.has(lw) || lw.length === 1) { out += c; continue; }                    // Abkürzungen, z. B., d. h.
+            if (next === ' ' && /^\p{Ll}/u.test(s.slice(i + 2))) { out += ','; continue; }  // Punkt mitten im Satz
+            out += c;
+        } else {
+            if (kind === 'sentence' && s.slice(i + 1).trim() === '') { out += '.'; continue; }   // Komma am Satzende
+            out += c;
+        }
+    }
+    return out;
+}
+
+/** Buchstabiert geschriebene Kopfzeile ("U N I T É 1") zusammenziehen */
+function collapseSpaced(text) {
+    const toks = text.split(/\s+/).filter(Boolean);
+    const singles = toks.filter((t) => t.length === 1).length;
+    if (toks.length >= 4 && singles / toks.length >= 0.6) return toks.join('');
+    return text;
+}
+
+/** Französisch: Zeilen unter dem Stichwort, die mit einer Flagge (als Zeichen erkannt) und englischem Wort oder mit =, ≠, → beginnen, gehören nicht zum Stichwort */
+function cutHeadwordLines(lines) {
+    if (!lines.length) return lines;
+    const out = [lines[0]];
+    for (let i = 1; i < lines.length; i++) {
+        const l = lines[i];
+        if (/^[≠=→<>~≈↔]/.test(l)) break;
+        const t = l.split(/\s+/);
+        if (t.length >= 2 && t[0].length <= 3 && !/\p{Ll}/u.test(t[0])) break;
+        out.push(l);
+    }
+    return out;
 }
 
 /* ---- Überschriften (Gliederung) ----
@@ -1533,7 +1787,7 @@ function parseSolutions(tokens) {
     return out;
 }
 
-function parsePage(rawWords, pageW, headerText, ctx, lang) {
+function parsePage(rawWords, pageW, headerText, ctx, lang, pageH) {
     const result = { entries: [], solutions: [] };
     const all = rawWords
         .map((w) => ({ t: (w.text || '').trim(), c: w.confidence, x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0, y1: w.bbox.y1 }))
@@ -1542,9 +1796,9 @@ function parsePage(rawWords, pageW, headerText, ctx, lang) {
     all.forEach((w) => { w.yc = (w.y0 + w.y1) / 2; });
     const medH = median(all.map((w) => w.y1 - w.y0));
 
-    // Laufender Seitenkopf: nur als Startkontext (Zwischenüberschriften haben Vorrang)
+    // Laufender Seitenkopf aus dem blauen Balken: nur als Startkontext (Zwischenüberschriften haben Vorrang)
     if (ctx.auto && !ctx.manual && headerText) {
-        const hs = parseHeading(headerText);
+        const hs = parseHeading(collapseSpaced(headerText.replace(/\s+/g, ' ')));
         const l1 = hs.find((h) => h.level === 0);
         const empty = !ctx.l.some(Boolean);
         if (hs.length && (empty || (l1 && l1.name !== ctx.l[0]))) applyHeadings(ctx, hs);
@@ -1564,11 +1818,30 @@ function parsePage(rawWords, pageW, headerText, ctx, lang) {
     const skip = new Set();
     const pageLines = groupLines(words, medH);
 
+    // Laufschrift: Kopfzeile (Großbuchstaben, "UNITÉ 1 | VOLET 2", "MODULE A") und Fußzeile mit Seitenzahl ("168 cent-soixante-huit") gehören nicht zu den Vokabeln
+    if (pageH) {
+        const zoneTop = pageH * 0.075;
+        const zoneBottom = pageH * 0.925;
+        pageLines.forEach((l) => {
+            const text = collapseSpaced(l.text);
+            if (l.yc < zoneTop) {
+                const lt = text.replace(/[^\p{L}]/gu, '');
+                const items = parseHeading(text);
+                if ((lt.length >= 4 && lt === lt.toUpperCase()) || items.length) {
+                    l.words.forEach((w) => skip.add(w));
+                    if (items.length && ctx.auto && !ctx.manual && !ctx.l.some(Boolean)) events.push({ y: -1, type: 'head', items });
+                }
+            } else if (l.yc > zoneBottom && l.words.length <= 6 && /(^|\s)\d{1,3}(\s|$)/.test(text)) {
+                l.words.forEach((w) => skip.add(w));
+            }
+        });
+    }
+
     // Lösungskästen erkennen und aus der Tabelle nehmen
     const blocks = [];
     let block = null;
     pageLines.forEach((l) => {
-        if (!isSolutionLine(l, medH)) return;
+        if (l.words.some((w) => skip.has(w)) || !isSolutionLine(l, medH)) return;
         if (block && l.yc - block.last < medH * 2.4) { block.lines.push(l); block.last = l.yc; }
         else { block = { lines: [l], last: l.yc }; blocks.push(block); }
     });
@@ -1581,7 +1854,7 @@ function parsePage(rawWords, pageW, headerText, ctx, lang) {
     // Überschriften: Zeilen, die ganz in Spalte 1 stehen oder deutlich größer gedruckt sind (breite Titel wie "Across cultures 1 ...")
     pageLines.forEach((l) => {
         if (l.words.some((w) => skip.has(w)) || l.words.length > 10) return;
-        const items = parseHeading(l.text);
+        const items = parseHeading(collapseSpaced(l.text));
         if (!items.length) return;
         const allCol0 = l.words.every((w) => colOf(w) === 0);
         const big = median(l.words.map((w) => w.y1 - w.y0)) >= medH * 1.15;
@@ -1609,7 +1882,7 @@ function parsePage(rawWords, pageW, headerText, ctx, lang) {
         let prev = row.a.yc;
         for (const l of colLines) {
             if (l.yc < row.top || l.yc >= row.end) continue;
-            if (l.yc - prev > medH * 2.2) break;
+            if (l.yc - prev > medH * 3) break;
             out.push(l.text.replace(/\s+/g, ' ').trim());
             prev = l.yc;
         }
@@ -1618,10 +1891,14 @@ function parsePage(rawWords, pageW, headerText, ctx, lang) {
 
     anchors.forEach((a, i) => {
         const row = { a, top: a.yc - tol, end: anchors[i + 1] ? anchors[i + 1].yc - tol : Infinity };
-        const term = parseHeadword(collect(l1, row).join(' '), lang);
-        const de = fixPunct(joinHyphenated(collect(l2, row)).replace(/[|!•]/g, ''));
+        const termLines = collect(l1, row);
+        const term = parseHeadword((lang === 'fr' ? cutHeadwordLines(termLines) : termLines).join(' '), lang);
+        // Deutsche Übersetzung: alle Zeilen und alle Bedeutungen, aber ohne "hier:"
+        const deLines = collect(l2, row).map((l) => l.replace(/^hier\s*[:.;,]\s*/i, ''));
+        const de = fixPeriodsCommas(cleanGerman(fixPunct(joinHyphenated(deLines).replace(/[|!•]/g, ''))), 'de');
         const rawSent = extractSentence(collect(l3, row), lang, term).replace(/\|/g, 'I');
         const conv = lang === 'fr' ? convertGaps(rawSent) : { text: rawSent, gaps: [] };
+        conv.text = fixPeriodsCommas(conv.text, 'sentence');
         const okTerm = /^\(?\p{L}/u.test(term) && term.split(' ').length <= 11;
         const okSent = lang === 'fr' || conv.text.length > 5;   // französische Einträge dürfen ohne Satz sein
         if (!(okTerm && de.length > 1 && okSent)) return;
@@ -1630,8 +1907,8 @@ function parsePage(rawWords, pageW, headerText, ctx, lang) {
         const confMap = (arr) => {
             const m = {};
             inRow(arr).forEach((w) => {
-                const k = w.t.toLowerCase().replace(/[^\p{L}]/gu, '');
-                if (k) m[k] = Math.min(m[k] ?? 100, w.c ?? 100);
+                const c = w.c ?? 100;
+                (w.t.toLowerCase().match(/\p{L}+/gu) || []).forEach((k) => { m[k] = Math.min(m[k] ?? 100, c); });
             });
             return m;
         };
@@ -1722,14 +1999,116 @@ function altList(a) {
     return parts;
 }
 
+/* ---- Lücken-Lösungen mit dem Wörterbuch vorschlagen (Französisch) ---- */
+/** Gebeugte Formen des Stichworts (Verb, Nomen, Adjektiv); nur echte Wörterbuchwörter bleiben übrig */
+function frForms(core) {
+    const forms = new Set([core]);
+    const add = (stem, ends) => ends.forEach((e) => forms.add(stem + e));
+    if (/er$/.test(core) && core.length > 3) {
+        const s = core.slice(0, -2);
+        add(s, ['e', 'es', 'ent', 'ons', 'ez', 'é', 'ée', 'és', 'ées', 'ais', 'ait', 'aient', 'ions', 'iez', 'erai', 'eras', 'era', 'erons', 'erez', 'eront', 'erais', 'erait', 'eraient', 'ant', 'a', 'ai', 'èrent']);
+        if (/g$/.test(s)) add(s, ['eons', 'eant', 'eais', 'eait', 'eaient']);
+        if (/c$/.test(s)) add(s.slice(0, -1) + 'ç', ['ons', 'ais', 'ait', 'aient', 'ant']);
+    } else if (/ir$/.test(core) && core.length > 3) {
+        const s = core.slice(0, -2);
+        add(s, ['is', 'it', 'issons', 'issez', 'issent', 'i', 'ie', 'ies', 'issais', 'issait', 'issaient', 'irai', 'iras', 'ira', 'irons', 'irez', 'iront', 'ît']);
+    } else if (/re$/.test(core) && core.length > 4) {
+        const s = core.slice(0, -2);
+        add(s, ['', 's', 't', 'ons', 'ez', 'ent', 'u', 'ue', 'us', 'ues', 'ais', 'ait', 'aient', 'rai', 'ras', 'ra', 'rons', 'rez', 'ront']);
+        if (/nd$/.test(s)) add(s.slice(0, -1), ['s', 't', 'gnons', 'gnez', 'gnent', 'gnais', 'gnait', 'gnant']);   // rejoindre: rejoins, rejoint, rejoignent
+    } else {
+        add(core, ['s', 'x', 'e', 'es']);
+        if (/al$/.test(core)) forms.add(core.slice(0, -2) + 'aux');
+    }
+    return [...forms];
+}
+const PRON = [
+    [/^(je|j')$/, ['e', 'ai', 'ais', 'is', 's', 'x']],
+    [/^tu$/, ['es', 'as', 'ais', 'is', 's']],
+    [/^(il|elle|on|qui|ce|c'|qu')$/, ['e', 'a', 'ait', 'it', 't', 'd']],
+    [/^nous$/, ['ons', 'ions']],
+    [/^vous$/, ['ez', 'iez']],
+    [/^(ils|elles)$/, ['ent', 'aient', 'ont']]
+];
+const AUX_FR = new Set(['ai', 'as', 'a', 'avons', 'avez', 'ont', 'est', 'suis', 'es', 'sommes', 'êtes', 'sont', 'avais', 'avait', 'étais', 'était', 'aurai', 'sera']);
+const INF_BEFORE = new Set(['pour', 'de', "d'", 'à', 'sans', 'dois', 'doit', 'peux', 'peut', 'veux', 'veut', 'vais', 'va', 'faut', 'aller', 'pouvoir', 'vouloir', 'devoir', 'savoir', 'sais', 'sait', 'aime', 'aimes']);
+const DET_PL = new Set(['les', 'des', 'mes', 'tes', 'ses', 'nos', 'vos', 'leurs', 'ces', 'plusieurs', 'quelques']);
+const DET_SG = new Set(['le', 'la', "l'", 'un', 'une', 'mon', 'ma', 'ton', 'ta', 'son', 'sa', 'ce', 'cet', 'cette', 'notre', 'votre', 'leur', 'du', 'au']);
+/** Wort direkt vor der n-ten Lücke (kleingeschrieben) */
+function gapPrevWord(sentence, idx) {
+    let pos = -1;
+    for (let i = 0; i <= idx; i++) {
+        pos = sentence.indexOf(GAP, pos + 1);
+        if (pos < 0) return '';
+    }
+    const m = sentence.slice(0, pos).match(/([\p{L}’']+)[\s’']*$/u);
+    return m ? m[1].toLowerCase().replace(/’/g, "'") : '';
+}
+/** Formen nach der Grammatik der Umgebung ordnen (Personalpronomen, Hilfsverb, Artikel, Infinitiv) */
+function rankForms(forms, core, prev) {
+    const pr = PRON.find(([re]) => re.test(prev));
+    const scored = forms.map((f, i) => {
+        let s = 0;
+        if (INF_BEFORE.has(prev)) s = f === core ? 3 : 0;
+        else if (AUX_FR.has(prev)) {
+            // Partizip: bei -er-Verben é/ée/és/ées, sonst i/u/t-Formen (Vermeidet "souhaite" als Partizip von souhaiter)
+            const part = /er$/.test(core) ? /(é|ée|és|ées)$/ : /(i|ie|is|ies|u|ue|us|ues|t|te|ts|tes)$/;
+            s = f !== core && part.test(f) ? 3 : 0;
+        }
+        else if (DET_PL.has(prev)) s = f !== core && /[sx]$/.test(f) ? 3 : 0;
+        else if (DET_SG.has(prev)) s = f === core ? 3 : (/e$/.test(f) ? 1 : 0);
+        else if (pr) s = f !== core && pr[1].some((e) => f.endsWith(e)) ? 2 : 0;
+        return { f, s, i };
+    });
+    return scored.sort((a, b) => b.s - a.s || a.i - b.i);
+}
+function suggestGap(item, idx) {
+    if (item.lang !== 'fr' || !dicts.fr) return null;
+    const core = coreWord(item.term);
+    if (core.length < 3) return null;
+    const forms = frForms(core).filter((f) => dicts.fr.has(f));
+    if (!forms.length) return null;
+    const ranked = rankForms(forms, core, gapPrevWord(item.sentence, idx));
+    return { a: ranked[0].f, alts: forms.slice(0, 12) };
+}
+const AUTO_MSG = 'Lücken-Lösung automatisch vorgeschlagen, bitte prüfen';
+/** Fehlende Lücken-Lösungen mit Formen des Stichworts füllen; als "Bitte prüfen" markiert, alle passenden Formen werden akzeptiert */
+function fillGapSuggestions(lang) {
+    if (lang !== 'fr' || !dicts.fr) return 0;
+    let n = 0;
+    vocabularyPool.forEach((v) => {
+        if (v.lang !== 'fr' || countGaps(v.sentence) !== v.gaps.length) return;
+        let any = false;
+        v.gaps.forEach((g, i) => {
+            if (g.a) return;
+            const s = suggestGap(v, i);
+            if (!s) return;
+            g.a = s.a;
+            g.alts = s.alts;
+            g.auto = true;
+            any = true;
+            n++;
+        });
+        if (any) v.warn = [...(v.warn || []).filter((x) => x !== AUTO_MSG), AUTO_MSG];
+    });
+    if (n) savePool();
+    return n;
+}
+
 function gapInfo(item) {
     const cnt = countGaps(item.sentence);
     if (cnt && item.gaps.length === cnt && item.gaps.every((g) => g.a)) {
-        return { text: numberGaps(item.sentence, cnt), answers: item.gaps.map((g) => g.a), blanks: cnt };
+        return {
+            text: numberGaps(item.sentence, cnt),
+            answers: item.gaps.map((g) => g.a),
+            alts: item.gaps.map((g) => g.alts || []),
+            blanks: cnt,
+            auto: item.gaps.some((g) => g.auto)
+        };
     }
     if (!cnt) {
         const g = makeGap(item);
-        if (g) return { text: g.text, answers: [g.match], blanks: 1 };
+        if (g) return { text: g.text, answers: [g.match], alts: [[]], blanks: 1, auto: false };
     }
     return null;
 }
@@ -1775,7 +2154,8 @@ function judgeGap(input, info) {
     if (parts.length < info.blanks) return null;
     let worst = 'exact';
     for (let i = 0; i < info.blanks; i++) {
-        const r = matchTargets(parts[i] || '', altList(info.answers[i]).map(normAns));
+        const targets = [...altList(info.answers[i]), ...((info.alts && info.alts[i]) || [])].map(normAns);
+        const r = matchTargets(parts[i] || '', targets);
         if (!r) return null;
         if (r === 'typo') worst = 'typo';
         else if (r === 'accent' && worst === 'exact') worst = 'accent';
@@ -1836,17 +2216,20 @@ function schedule(item, correct) {
 /** Antwort verbuchen: Zähler, Serie, Tagesstatistik, bei der täglichen Übung auch die Phase */
 function recordAnswer(item, correct) {
     const first = !sessionDone.has(item);
+    const exam = sessionKind === 'exam' ? sessionExam : null;
+    const global = !exam || exam.affect;                 // Prüfungsübung ändert die Phasen nur, wenn das gewählt wurde
     const wasNew = isNew(item);
-    if (correct) { item.ok++; item.streak++; } else { item.bad++; item.streak = 0; }
-    if (!first) return;                       // Wiederholungen derselben Vokabel ändern Phase und Statistik nicht
+    if (global) { if (correct) { item.ok++; item.streak++; } else { item.bad++; item.streak = 0; } }
+    if (!first) return;                                  // Wiederholungen derselben Vokabel ändern Phase und Statistik nicht
     sessionDone.add(item);
     answeredCount++;
     if (!correct) mistakeCount++;
     const t = touchToday();
     t.n++;
     if (correct) t.ok++;
-    if (wasNew) t.nw++;
-    if (sessionKind === 'daily') schedule(item, correct);
+    if (wasNew && global) t.nw++;
+    if (exam) examSchedule(exam, item, correct);
+    if (global && (sessionKind === 'daily' || exam)) schedule(item, correct);
 }
 
 /** Frageart pro Vokabel. Standard: Deutsch zeigen, Fremdsprache eingeben */
@@ -1857,7 +2240,7 @@ function questionMode(item) {
     if (qChoice === 'reverse') return 'reverse';
     if (qChoice === 'gap') return hasGap ? 'gap' : 'translate';
     // gemischt
-    if (sessionKind === 'trouble') {
+    if (sessionKind === 'trouble' || sessionKind === 'exam') {
         const opts = ['translate', 'reverse'];
         if (hasGap) opts.push('gap');
         return opts[Math.floor(Math.random() * opts.length)];
@@ -1922,10 +2305,9 @@ function renderToday() {
     $('daily-btn').disabled = total === 0;
 
     const trouble = troubleList(pool);
-    $('trouble-text').textContent = trouble.length
-        ? `${trouble.length} Vokabeln mit Schwierigkeiten (mindestens 2 Fehler, noch nicht 3-mal in Folge richtig).`
-        : 'Aktuell keine Problem-Vokabeln.';
-    $('trouble-btn').disabled = trouble.length === 0;
+    const tb = $('trouble-btn');
+    tb.textContent = trouble.length ? `Problem-Vokabeln (${trouble.length})` : 'Problem-Vokabeln';
+    tb.disabled = trouble.length === 0;
 }
 
 function updateSelCount() {
@@ -1959,6 +2341,7 @@ function renderLearn() {
         box.append(label);
     });
     renderPhaseBars(pool);
+    renderExams();
     updateSelCount();
 }
 
@@ -2045,6 +2428,158 @@ function deleteSection(prefix) {
     refreshAll();
 }
 
+/** Text schreiben und unsicher gelesene Wörter hervorheben */
+function appendMarked(el, text, marks) {
+    if (!marks || !marks.length) { el.append(document.createTextNode(text)); return; }
+    const set = new Set(marks);
+    const re = /\p{L}+/gu;
+    let last = 0;
+    let m;
+    while ((m = re.exec(text))) {
+        if (!set.has(m[0].toLowerCase())) continue;
+        if (m.index > last) el.append(document.createTextNode(text.slice(last, m.index)));
+        const mk = document.createElement('mark');
+        mk.className = 'lowconf';
+        mk.title = 'Unsicher gelesen';
+        mk.textContent = m[0];
+        el.append(mk);
+        last = m.index + m[0].length;
+    }
+    if (last < text.length) el.append(document.createTextNode(text.slice(last)));
+}
+
+/* ---- Auswahlmodus ---- */
+function updateSelectBar() {
+    const bar = $('select-bar');
+    if (!bar) return;
+    bar.hidden = !selectMode;
+    $('select-count').textContent = `${selectedIds.size} ausgewählt`;
+    ['sel-move', 'sel-exam', 'sel-delete'].forEach((id) => { $(id).disabled = selectedIds.size === 0; });
+    $('select-btn').textContent = selectMode ? 'Auswahl beenden' : 'Auswählen';
+}
+function setSelectMode(on) {
+    selectMode = on;
+    if (!on) selectedIds.clear();
+    renderLists();
+}
+function collectNodeItems(node) {
+    return [...node.items, ...[...node.children.values()].flatMap(collectNodeItems)];
+}
+function toggleSelectNode(node) {
+    const items = collectNodeItems(node);
+    const all = items.every((v) => selectedIds.has(v.id));
+    items.forEach((v) => { if (all) selectedIds.delete(v.id); else selectedIds.add(v.id); });
+    renderLists();
+}
+function deleteSelected() {
+    const n = selectedIds.size;
+    if (!n || !confirm(`${n} Vokabeln löschen?`)) return;
+    vocabularyPool = vocabularyPool.filter((v) => !selectedIds.has(v.id));
+    rebuildProtected();
+    savePool();
+    selectMode = false;
+    selectedIds.clear();
+    refreshAll();
+}
+
+/* ---- Kategorien verschieben, Vokabeln in Kategorien eintragen ---- */
+function moveSection(prefix, parent) {
+    if (parent.length >= prefix.length && prefix.every((p, i) => parent[i] === p)) return 'Eine Kategorie kann nicht in sich selbst verschoben werden.';
+    const hits = langPool().filter((v) => matchesPrefix(v, prefix));
+    if (!hits.length) return 'In dieser Kategorie sind keine Vokabeln.';
+    const newPaths = hits.map((v) => [...parent, ...v.path.slice(prefix.length - 1)]);
+    if (newPaths.some((p) => p.length > 3)) return 'Zu tief verschachtelt: Es sind höchstens 3 Ebenen möglich.';
+    hits.forEach((v, i) => { v.path = newPaths[i]; });
+    return '';
+}
+function openMoveDialog(kind, info = {}) {
+    moveCtx = { kind, ...info };
+    const sel = $('mv-existing');
+    sel.replaceChildren();
+    const first = document.createElement('option');
+    first.value = '';
+    first.textContent = 'Bestehende Kategorie wählen...';
+    sel.append(first);
+    const seen = new Set();
+    langPool().forEach((v) => v.path.forEach((_, i) => {
+        const p = v.path.slice(0, i + 1);
+        const k = p.join(' › ');
+        if (seen.has(k)) return;
+        seen.add(k);
+        const o = document.createElement('option');
+        o.value = JSON.stringify(p);
+        o.textContent = k;
+        sel.append(o);
+    }));
+    [1, 2, 3].forEach((i) => setVal(`mv-${i}`, ''));
+    $('mv-msg').hidden = true;
+    if (kind === 'section') {
+        const name = info.prefix[info.prefix.length - 1];
+        $('mv-title').textContent = `Kategorie „${name}“ verschieben`;
+        $('mv-info').dataset.info = `Wähle die übergeordnete Kategorie, unter der „${name}“ künftig stehen soll. Leer lassen = oberste Ebene. Gibt es dort schon eine Kategorie mit demselben Namen, werden beide zusammengeführt.`;
+    } else {
+        $('mv-title').textContent = `${selectedIds.size} Vokabeln verschieben`;
+        $('mv-info').dataset.info = 'Wähle eine bestehende Kategorie oder tippe einen neuen Namen ein. Bis zu 3 Ebenen sind möglich (z. B. Unité 1, Volet 2, Module A).';
+    }
+    $('move-dialog').showModal();
+}
+function confirmMove() {
+    if (!moveCtx) return;
+    const path = [1, 2, 3].map((i) => $(`mv-${i}`).value.trim()).filter(Boolean);
+    const msg = (t) => { const el = $('mv-msg'); el.textContent = t; el.hidden = !t; };
+    if (moveCtx.kind === 'items') {
+        vocabularyPool.forEach((v) => { if (selectedIds.has(v.id)) v.path = [...path]; });
+    } else {
+        const err = moveSection(moveCtx.prefix, path);
+        if (err) return msg(err);
+    }
+    moveCtx = null;
+    $('move-dialog').close();
+    rebuildProtected();
+    savePool();
+    selectMode = false;
+    selectedIds.clear();
+    refreshAll();
+}
+function addToSection(prefix) {
+    showTab('add');
+    [0, 1, 2].forEach((i) => setVal(`path-${i + 1}`, prefix[i] || ''));
+    const d = $('manual-box');
+    if (d) d.open = true;
+    $('m-term').focus();
+    setStatus(`Neue Vokabeln werden in „${prefix.join(' › ')}“ eingetragen. Für Screenshots die automatische Erkennung der Bereiche abschalten, wenn alles in diese Kategorie soll.`, 'ok');
+}
+
+/* ---- Vokabeln zu einer Prüfung hinzufügen ---- */
+function openPickExam() {
+    if (!selectedIds.size) return;
+    const open = exams.filter((e) => examDays(e) >= 0);
+    if (!open.length) { setStatus('Lege zuerst im Tab „Üben“ eine Prüfung an.', 'error'); return; }
+    const sel = $('pick-exam');
+    sel.replaceChildren();
+    open.forEach((e) => {
+        const o = document.createElement('option');
+        o.value = e.id;
+        o.textContent = `${e.name} (${fmtDate(e.date)})`;
+        sel.append(o);
+    });
+    $('pick-dialog').showModal();
+}
+function confirmPick() {
+    const ex = exams.find((e) => e.id === $('pick-exam').value);
+    const n = selectedIds.size;
+    if (ex) {
+        const set = new Set(ex.ids);
+        selectedIds.forEach((id) => set.add(id));
+        ex.ids = [...set];
+        savePool();
+        setStatus(`${n} Vokabeln zur Prüfung „${ex.name}“ hinzugefügt.`, 'ok');
+    }
+    $('pick-dialog').close();
+    setSelectMode(false);
+    renderExams();
+}
+
 function itemMeta(v) {
     const parts = [`Phase ${v.phase}`];
     if (isNew(v)) parts.push('neu');
@@ -2063,17 +2598,30 @@ function updateWarnCount() {
 function buildItemRow(v) {
     const row = document.createElement('div');
     row.className = 'item';
+    if (selectMode) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'row-check';
+        cb.checked = selectedIds.has(v.id);
+        cb.setAttribute('aria-label', `${v.term} auswählen`);
+        cb.addEventListener('change', () => {
+            if (cb.checked) selectedIds.add(v.id); else selectedIds.delete(v.id);
+            updateSelectBar();
+        });
+        row.append(cb);
+    }
     const main = document.createElement('div');
     main.className = 'item-main';
     const t = document.createElement('strong');
-    t.textContent = v.term;
+    appendMarked(t, v.term, v.lowc && v.lowc.term);
     const d = document.createElement('span');
-    d.textContent = ` – ${v.de}`;
+    d.append(document.createTextNode(' – '));
+    appendMarked(d, v.de, v.lowc && v.lowc.de);
     main.append(t, d);
     if (v.sentence) {
         const s = document.createElement('div');
         s.className = 'item-sent';
-        s.textContent = displaySentence(v);
+        appendMarked(s, displaySentence(v), v.lowc && v.lowc.sentence);
         main.append(s);
     }
     const meta = document.createElement('div');
@@ -2097,6 +2645,7 @@ function buildItemRow(v) {
     if (v.warn && v.warn.length) {
         acts.append(iconButton('Geprüft', `${v.term} als geprüft markieren`, () => {
             v.warn = undefined;
+            v.lowc = undefined;
             savePool();
             if (onlyWarn) row.remove(); else row.replaceWith(buildItemRow(v));
             updateWarnCount();
@@ -2118,6 +2667,15 @@ function buildItemRow(v) {
 function buildEditor(v) {
     const form = document.createElement('div');
     form.className = 'editor';
+    if (v.lowc) {
+        const words = [...new Set([...(v.lowc.term || []), ...(v.lowc.de || []), ...(v.lowc.sentence || [])])];
+        if (words.length) {
+            const n = document.createElement('div');
+            n.className = 'warn-note';
+            n.textContent = `Unsicher gelesen: ${words.join(', ')}`;
+            form.append(n);
+        }
+    }
     const mk = (label, value, list) => {
         const wrap = document.createElement('label');
         wrap.className = 'field';
@@ -2155,9 +2713,9 @@ function buildEditor(v) {
     const iDe = mk('Deutsch', v.de);
     const iSent = mk('Beispielsatz (Lücke = _____)', v.sentence);
     const iGaps = mk('Lücken-Lösung(en), mit ; trennen', v.gaps.map((g) => g.a).join('; '));
-    const p1 = mk('Bereich Ebene 1', v.path[0] || '', 'dl-1');
-    const p2 = mk('Bereich Ebene 2', v.path[1] || '', 'dl-2');
-    const p3 = mk('Bereich Ebene 3', v.path[2] || '', 'dl-3');
+    const p1 = mk('Kategorie, Ebene 1', v.path[0] || '', 'dl-1');
+    const p2 = mk('Kategorie, Ebene 2', v.path[1] || '', 'dl-2');
+    const p3 = mk('Kategorie, Ebene 3', v.path[2] || '', 'dl-3');
     const phSel = mkSelect('Phase', [1, 2, 3, 4, 5, 6].map((n) => [String(n), `Phase ${n}`]), String(v.phase));
 
     const actions = document.createElement('div');
@@ -2185,7 +2743,7 @@ function buildEditor(v) {
         v.sentence = normGapMarks(iSent.value.trim());
         const cnt = countGaps(v.sentence);
         const ans = iGaps.value.split(';').map((s) => s.trim());
-        v.gaps = Array.from({ length: cnt }, (_, i) => ({ n: v.gaps[i] ? v.gaps[i].n : null, a: ans[i] || '' }));
+        v.gaps = Array.from({ length: cnt }, (_, i) => ({ n: v.gaps[i] ? v.gaps[i].n : null, a: ans[i] || '', auto: false, alts: [] }));
         v.path = [p1.value, p2.value, p3.value].map((s) => s.trim()).filter(Boolean);
         const np = Number(phSel.value);
         if (np !== v.phase) {
@@ -2194,6 +2752,7 @@ function buildEditor(v) {
         }
         v.fix = undefined;                                   // von Hand bestätigt
         v.warn = undefined;
+        v.lowc = undefined;
         addConfirmed(`${term} ${de} ${v.sentence}`);
         rebuildProtected();
         savePool();
@@ -2235,8 +2794,11 @@ function renderNode(node, prefix, openAll) {
         const path = [...prefix, child.name];
         const acts = document.createElement('span');
         acts.className = 'sec-actions';
+        if (selectMode) acts.append(iconButton('Alle wählen', `Alle Vokabeln in „${child.name}“ wählen`, () => toggleSelectNode(child)));
         acts.append(
             iconButton('Umbenennen', `„${child.name}“ umbenennen`, () => renameSection(path)),
+            iconButton('Verschieben', `„${child.name}“ verschieben`, () => openMoveDialog('section', { prefix: path })),
+            iconButton('+ Vokabel', `Vokabel in „${child.name}“ hinzufügen`, () => addToSection(path)),
             iconButton('Löschen', `„${child.name}“ löschen`, () => deleteSection(path))
         );
         frag.append(makeSection(child.name, path.join(' › '), countItems(child), (body) => body.append(renderNode(child, path, openAll)), acts));
@@ -2260,6 +2822,109 @@ function renderLists() {
     tree.append(renderNode(buildTree(items), [], !!q || onlyWarn));
     updateAddLabels();
     updateWarnCount();
+    updateSelectBar();
+}
+
+/* ================= Prüfungen: Anzeige ================= */
+function renderExams() {
+    const box = $('exam-list');
+    if (!box) return;
+    box.replaceChildren();
+    const list = [...exams].sort((a, b) => a.date.localeCompare(b.date));
+    $('exam-empty').hidden = list.length > 0;
+    list.forEach((ex) => {
+        const days = examDays(ex);
+        const items = examItems(ex);
+        const due = days >= 0 ? examDueItems(ex).length : 0;
+        const when = days < 0 ? 'vorbei' : days === 0 ? 'heute' : days === 1 ? 'morgen' : `in ${days} Tagen`;
+        const row = document.createElement('div');
+        row.className = 'exam-row';
+        const info = document.createElement('div');
+        info.className = 'exam-info';
+        const name = document.createElement('strong');
+        name.textContent = ex.name;
+        const sub = document.createElement('div');
+        sub.className = 'item-meta';
+        sub.textContent = `${fmtDate(ex.date)} (${when}) · ${items.length} Vokabeln${days >= 0 ? ` · heute fällig: ${due}` : ''}`;
+        info.append(name, sub);
+        const acts = document.createElement('div');
+        acts.className = 'item-actions';
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.className = 'mini nav-btn';
+        go.textContent = 'Üben';
+        go.disabled = due === 0 || days < 0;
+        go.addEventListener('click', () => requestSession('exam', ex.id));
+        acts.append(
+            go,
+            iconButton('Bearbeiten', `${ex.name} bearbeiten`, () => openExamDialog(ex.id)),
+            iconButton('Löschen', `${ex.name} löschen`, () => {
+                if (!confirm(`Prüfung „${ex.name}“ löschen? Die Vokabeln selbst bleiben erhalten.`)) return;
+                exams = exams.filter((x) => x.id !== ex.id);
+                savePool();
+                renderExams();
+            })
+        );
+        row.append(info, acts);
+        box.append(row);
+    });
+}
+
+function openExamDialog(id) {
+    editingExamId = id || null;
+    const ex = id ? exams.find((e) => e.id === id) : null;
+    $('exam-title').textContent = ex ? 'Prüfung bearbeiten' : 'Neue Prüfung';
+    setVal('ex-name', ex ? ex.name : '');
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    setVal('ex-date', ex ? ex.date : dateKey(d));
+    $('ex-affect').checked = ex ? ex.affect : false;
+    $('ex-msg').hidden = true;
+    const have = new Set(ex ? ex.ids : []);
+    const groups = new Map();
+    vocabularyPool.forEach((v) => {
+        const k = `${v.lang}|${groupKey(v)}`;
+        if (!groups.has(k)) groups.set(k, { label: `${LANGS[v.lang].name}: ${groupKey(v)}`, ids: [] });
+        groups.get(k).ids.push(v.id);
+    });
+    const box = $('ex-cats');
+    box.replaceChildren();
+    exCatState = [];
+    groups.forEach((g) => {
+        const label = document.createElement('label');
+        label.className = 'check-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        const was = g.ids.every((i) => have.has(i));
+        cb.checked = was;
+        const txt = document.createElement('span');
+        txt.textContent = `${g.label} (${g.ids.length})`;
+        label.append(cb, txt);
+        box.append(label);
+        exCatState.push({ ids: g.ids, cb, was });
+    });
+    $('exam-dialog').showModal();
+}
+function saveExam() {
+    const name = $('ex-name').value.trim();
+    const date = $('ex-date').value;
+    const msg = (t) => { const el = $('ex-msg'); el.textContent = t; el.hidden = !t; };
+    if (!name) return msg('Bitte einen Namen eingeben.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return msg('Bitte ein Datum wählen.');
+    if (examDays({ date }) < 0) return msg('Das Datum liegt in der Vergangenheit.');
+    const old = editingExamId ? exams.find((e) => e.id === editingExamId) : null;
+    const ids = new Set(old ? old.ids : []);
+    exCatState.forEach(({ ids: gids, cb, was }) => {
+        if (cb.checked) gids.forEach((i) => ids.add(i));
+        else if (was) gids.forEach((i) => ids.delete(i));
+    });
+    if (!ids.size) return msg('Bitte mindestens eine Kategorie wählen.');
+    const affect = $('ex-affect').checked;
+    if (old) Object.assign(old, { name, date, ids: [...ids], affect });
+    else exams.push({ id: uid(), name, date, ids: [...ids], affect, progress: {} });
+    savePool();
+    $('exam-dialog').close();
+    renderExams();
 }
 
 /* ================= Trainer ================= */
@@ -2277,8 +2942,6 @@ function savePrefs(q, practice) {
 
 function resetCounters() {
     sessionDone = new Set();
-    helpCount = new Map();
-    helpedItems = new Set();
     mistakeCount = 0;
     answeredCount = 0;
     promoted = 0;
@@ -2291,15 +2954,22 @@ function buildList(kind) {
         return [...review, ...fresh];
     }
     if (kind === 'trouble') return troubleList(selectedItems()).slice(0, 20);
+    if (kind === 'exam') {
+        const ex = exams.find((e) => e.id === pendingExamId);
+        return ex && examDays(ex) >= 0 ? examDueItems(ex) : [];
+    }
     return selectedItems();
 }
 
 /** Prüft, ob es etwas zu üben gibt, und fragt dann nach der Frageart (und dem Übungsmodus) */
-function requestSession(kind) {
+/** Prüft, ob es etwas zu üben gibt, und fragt dann kurz nach Frageart und Übungsmodus */
+function requestSession(kind, examId) {
+    pendingExamId = examId || null;
     const list = buildList(kind);
     if (!list.length) {
         if (kind === 'daily') setStatus(`Heute ist nichts mehr fällig. Nächste Wiederholung: ${nextDueText(selectedItems())}.`, 'ok');
         else if (kind === 'trouble') setStatus('Keine Problem-Vokabeln vorhanden.', 'ok');
+        else if (kind === 'exam') setStatus('Für diese Prüfung ist heute nichts mehr fällig.', 'ok');
         else setStatus('Bitte mindestens einen Bereich auswählen.', 'error');
         return;
     }
@@ -2309,8 +2979,9 @@ function requestSession(kind) {
     const radio = document.querySelector(`input[name="qmode"][value="${prefs.q}"]`);
     if (radio) radio.checked = true;
     $('mode-practice').checked = prefs.practice;
-    const titles = { daily: 'Tägliche Übung', trouble: 'Problem-Vokabeln', free: 'Freies Üben' };
-    $('mode-title').textContent = `${titles[kind]}: Wie möchtest du üben?`;
+    const ex = kind === 'exam' ? exams.find((e) => e.id === examId) : null;
+    const titles = { daily: 'Tägliche Übung', trouble: 'Problem-Vokabeln', free: 'Freies Üben', exam: ex ? `Prüfung: ${ex.name}` : 'Prüfung' };
+    $('mode-title').textContent = titles[kind];
     $('mode-count').textContent = `${list.length} Vokabeln`;
     updateModeLabels();
     const dlg = $('mode-dialog');
@@ -2321,26 +2992,30 @@ function requestSession(kind) {
 function launchSession(kind, q, practice) {
     const list = buildList(kind);
     if (!list.length) { backToMain(); return; }
+    if (kind === 'free' && q === 'gap' && !list.some((v) => gapInfo(v))) {
+        setStatus('In den gewählten Bereichen gibt es keine Lückentexte (Satz mit Lücke und bekannter Lösung). Ergänze Lösungen unter „Listen“ oder wähle eine andere Frageart.', 'error');
+        return;
+    }
     qChoice = q;
     practiceMode = practice;
     sessionKind = kind;
+    sessionExam = kind === 'exam' ? (exams.find((e) => e.id === pendingExamId) || null) : null;
     savePrefs(q, practice);
-    if (kind === 'free') {
-        sessionPool = list;
-        roundQueue = q === 'mixed' ? ['translate', 'gap'] : [q];
-        if (roundQueue.includes('gap') && !sessionPool.some((v) => gapInfo(v))) {
-            if (q === 'gap') {
-                setStatus('In den gewählten Bereichen gibt es keine Lückentexte (Satz mit Lücke und bekannter Lösung). Ergänze Lösungen unter „Listen“ oder wähle eine andere Frageart.', 'error');
-                return;
-            }
-            roundQueue = ['translate'];
+    resetCounters();
+    setStatus('');
+    const start = () => {
+        if (kind === 'free') {
+            sessionPool = list;
+            roundQueue = q === 'mixed' ? ['translate', 'gap'] : [q];
+            if (roundQueue.includes('gap') && !list.some((v) => gapInfo(v))) roundQueue = ['translate'];
+            nextRound('');
+        } else {
+            beginSession(kind, list);
         }
-        resetCounters();
-        setStatus('');
-        nextRound('');
-    } else {
-        beginSession(kind, list);
-    }
+    };
+    // Übungsmodus: zuerst Karteikarten für alle Vokabeln in Phase 1, danach die normale Abfrage
+    const cards = practice ? list.filter((v) => v.phase === 1) : [];
+    if (cards.length) startCards(cards, start); else start();
 }
 
 function nextRound(notice) {
@@ -2367,66 +3042,79 @@ function beginSession(kind, list) {
     roundQueue = [];
     currentIndex = 0;
     isRetry = false;
-    resetCounters();
-    setStatus('');
     showScreen('trainer');
     showQuestion('');
 }
 
+/* ---- Karteikarten (Übungsmodus): Karte umdrehen (Tippen oder Enter), dann weiter (Tippen, Button oder Enter) ---- */
+function cardSides(item) {
+    const sentence = item.sentence ? displaySentence(item) : '';
+    if (qChoice === 'reverse') return { q: item.term, a: item.de, s: sentence };
+    const info = gapInfo(item);
+    if (qChoice === 'gap' && info) return { q: info.text, a: info.answers.join('; '), s: '' };
+    return { q: item.de, a: item.term, s: sentence };
+}
+function startCards(list, next) {
+    cardList = shuffle([...list]);
+    cardIndex = 0;
+    afterCards = next;
+    showScreen('card');
+    showCard();
+}
+function showCard() {
+    const item = cardList[cardIndex];
+    cardFlipped = false;
+    const card = $('flashcard');
+    card.dataset.flipped = '0';
+    card.setAttribute('aria-pressed', 'false');
+    $('fc-label').textContent = CARD_TEXT.front;
+    $('fc-text').textContent = cardSides(item).q;
+    $('card-progress').textContent = `Karte ${cardIndex + 1} von ${cardList.length}`;
+    $('card-next').hidden = true;
+    card.focus();
+}
+function flipOrNext() {
+    const item = cardList[cardIndex];
+    const card = $('flashcard');
+    if (!cardFlipped) {
+        cardFlipped = true;
+        const s = cardSides(item);
+        card.dataset.flipped = '1';
+        card.setAttribute('aria-pressed', 'true');
+        $('fc-label').textContent = CARD_TEXT.back;
+        $('fc-text').textContent = s.s ? `${s.a}\n${s.s}` : s.a;
+        $('card-next').hidden = false;
+        card.classList.remove('flip');
+        void card.offsetWidth;
+        card.classList.add('flip');
+        card.focus();
+        return;
+    }
+    cardIndex++;
+    if (cardIndex < cardList.length) { showCard(); return; }
+    const next = afterCards;
+    afterCards = null;
+    if (next) next(); else backToMain();
+}
+
 function restartSession() {
+    pendingExamId = sessionExam ? sessionExam.id : null;
     launchSession(sessionKind, qChoice, practiceMode);
 }
 
 function phaseTitle(item) {
-    const n = LANGS[currentLang].name;
+    const n = LANGS[item.lang].name;
     const titles = { translate: `Deutsch → ${n}`, reverse: `${n} → Deutsch`, gap: 'Lückentext' };
     const retry = isRetry ? ', Wiederholung' : '';
-    const practice = practiceMode && item.phase === 1 ? ', Übungsmodus' : '';
-    if (sessionKind === 'daily') return `Tägliche Übung, Phase ${item.phase}${practice}${retry}`;
+    if (sessionKind === 'daily') return `Tägliche Übung, Phase ${item.phase}${retry}`;
     if (sessionKind === 'trouble') return `Problem-Vokabeln${retry}`;
-    return `${titles[qMode]}${practice}${retry}`;
+    if (sessionKind === 'exam') return `Prüfung: ${sessionExam ? sessionExam.name : ''}${retry}`;
+    return `${titles[qMode]}${retry}`;
 }
 
 /* Karteikarte (Übungsmodus, nur Vokabeln in Phase 1) */
-function flashBack(item) {
-    const sent = item.sentence ? `\n${displaySentence(item)}` : '';
-    if (qMode === 'reverse') return `${item.de}${sent}`;
-    if (qMode === 'gap') {
-        const info = gapInfo(item);
-        return `${info ? info.answers.join('; ') : item.term}${sent}`;
-    }
-    return `${item.term}${sent}`;
-}
-function setupFlashcard(item) {
-    const box = $('flashcard-box');
-    if (!box) return;
-    const show = practiceMode && item.phase === 1;
-    box.hidden = !show;
-    if (!show) return;
-    const card = $('flashcard');
-    card.dataset.flipped = '0';
-    card.setAttribute('aria-pressed', 'false');
-    card.classList.remove('flip');
-    $('fc-front').hidden = false;
-    $('fc-back').hidden = true;
-    $('fc-back').textContent = flashBack(item);
-}
-function flipCard() {
-    const card = $('flashcard');
-    const flipped = card.dataset.flipped !== '1';
-    card.dataset.flipped = flipped ? '1' : '0';
-    card.setAttribute('aria-pressed', String(flipped));
-    $('fc-front').hidden = flipped;
-    $('fc-back').hidden = !flipped;
-    card.classList.remove('flip');
-    void card.offsetWidth;
-    card.classList.add('flip');
-    if (flipped && !isShowingResolution) peeked = true;
-}
-
 function showQuestion(notice = '') {
     isShowingResolution = false;
-    peeked = false;
     const item = activeList[currentIndex];
     const input = $('user-input');
     const sentenceBox = $('sentence-box');
@@ -2443,7 +3131,7 @@ function showQuestion(notice = '') {
 
     if (qMode === 'translate') {
         $('question-display').textContent = item.de;
-        input.placeholder = currentLang === 'fr' ? 'Französische Übersetzung...' : 'Englische Übersetzung...';
+        input.placeholder = item.lang === 'fr' ? 'Französische Übersetzung...' : 'Englische Übersetzung...';
     } else if (qMode === 'reverse') {
         $('question-display').textContent = item.term;
         input.placeholder = 'Deutsche Übersetzung...';
@@ -2455,7 +3143,6 @@ function showQuestion(notice = '') {
         sentenceBox.textContent = info.text;
         sentenceBox.hidden = false;
     }
-    setupFlashcard(item);
     input.focus();
 }
 
@@ -2475,38 +3162,24 @@ function checkAnswer() {
         const info = gapInfo(item);
         result = judgeGap(value, info);
         if (!result && item.lang === 'en') result = judgeTerm(value, item);
-        solution = info.answers.join('; ') + (item.lang === 'en' ? ` (${item.term})` : '');
+        solution = info.answers.join('; ') + (item.lang === 'en' ? ` (${item.term})` : '') + (info.auto ? ' (Vorschlag)' : '');
     } else {
         result = judgeTerm(value, item);
     }
 
-    const helped = peeked && practiceMode && item.phase === 1;
-    if (helped) {
-        // Karteikarte benutzt: kein Punkt, kein Fehler, die Vokabel kommt noch einmal (höchstens einmal zusätzlich)
-        const n = (helpCount.get(item) || 0) + 1;
-        helpCount.set(item, n);
-        helpedItems.add(item);
-        const again = n < 2;
-        if (again && !wrongAnswers.includes(item)) wrongAnswers.push(item);
-        feedback.className = result ? 'feedback correct' : 'feedback wrong';
-        feedback.textContent = (result ? 'Richtig. ' : `Lösung: ${solution}. `)
-            + `Mit Karteikarte zählt das noch nicht als gekonnt.${again ? ' Die Vokabel kommt gleich noch einmal.' : ''}`;
+    recordAnswer(item, !!result);
+    if (result) {
+        feedback.className = 'feedback correct';
+        if (result === 'typo') feedback.textContent = `Richtig (kleiner Tippfehler). Schreibweise: ${solution}`;
+        else if (result === 'accent') feedback.textContent = `Richtig, aber achte auf die Akzente: ${solution}`;
+        else feedback.textContent = 'Richtig!';
     } else {
-        recordAnswer(item, !!result);
-        if (result) {
-            feedback.className = 'feedback correct';
-            if (result === 'typo') feedback.textContent = `Richtig (kleiner Tippfehler). Schreibweise: ${solution}`;
-            else if (result === 'accent') feedback.textContent = `Richtig, aber achte auf die Akzente: ${solution}`;
-            else feedback.textContent = 'Richtig!';
-        } else {
-            feedback.className = 'feedback wrong';
-            feedback.textContent = `Falsch. Lösung: ${solution}`;
-            if (!wrongAnswers.includes(item)) wrongAnswers.push(item);
-        }
+        feedback.className = 'feedback wrong';
+        feedback.textContent = `Falsch. Lösung: ${solution}`;
+        if (!wrongAnswers.includes(item)) wrongAnswers.push(item);
     }
     savePool();
 
-    $('flashcard-box').hidden = true;
     if (item.sentence) {
         $('sentence-box').textContent = displaySentence(item);
         $('sentence-box').hidden = false;
@@ -2532,9 +3205,12 @@ function advance() {
 
 function finish() {
     let text = `${answeredCount} Vokabeln abgefragt, ${answeredCount - mistakeCount} davon beim ersten Mal richtig.`;
-    if (helpedItems.size) text += ` ${helpedItems.size} mit der Karteikarte geübt.`;
     if (sessionKind === 'daily') {
         text += ` ${promoted} in eine höhere Phase, ${demoted} zurückgestuft. Nächste Wiederholung: ${nextDueText(langPool())}.`;
+    }
+    if (sessionKind === 'exam' && sessionExam) {
+        const days = examDays(sessionExam);
+        text += ` Prüfung ${days <= 0 ? 'heute' : days === 1 ? 'morgen' : `in ${days} Tagen`}, heute noch fällig: ${examDueItems(sessionExam).length}.`;
     }
     const s = streakDays();
     if (s > 0) text += ` Serie: ${s} ${s === 1 ? 'Tag' : 'Tage'}.`;
@@ -2829,6 +3505,63 @@ function setupPwa() {
     });
 }
 
+/* ================= Hilfetexte: kleines i mit Popup (Hover, Fokus oder Tippen) ================= */
+function setupInfo() {
+    const pop = $('info-pop');
+    if (!pop) return;
+    let current = null;
+    let sticky = false;
+    const hide = () => {
+        pop.hidden = true;
+        if (current) { current.setAttribute('aria-expanded', 'false'); current.removeAttribute('aria-describedby'); }
+        current = null;
+        sticky = false;
+    };
+    const show = (btn) => {
+        if (current && current !== btn) current.setAttribute('aria-expanded', 'false');
+        current = btn;
+        const host = (btn.closest && btn.closest('dialog')) || document.body;   // in Dialogen im Dialog anzeigen, sonst liegt es dahinter
+        if (pop.parentNode !== host) host.append(pop);
+        pop.textContent = btn.dataset.info || '';
+        pop.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        btn.setAttribute('aria-describedby', 'info-pop');
+        const r = btn.getBoundingClientRect();
+        pop.style.maxWidth = `${Math.min(300, window.innerWidth - 24)}px`;
+        const w = pop.offsetWidth, h = pop.offsetHeight;
+        const left = Math.max(12, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 12));
+        let top = r.top - h - 8;
+        if (top < 8) top = r.bottom + 8;
+        pop.style.left = `${left}px`;
+        pop.style.top = `${top}px`;
+    };
+    const infoBtn = (e) => (e.target && e.target.closest ? e.target.closest('.info-btn') : null);
+    document.addEventListener('click', (e) => {
+        const b = infoBtn(e);
+        if (b) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (current === b && sticky) hide(); else { show(b); sticky = true; }
+        } else if (current) hide();
+    });
+    document.addEventListener('pointerover', (e) => { const b = infoBtn(e); if (b && e.pointerType === 'mouse' && !sticky) show(b); });
+    document.addEventListener('pointerout', (e) => { const b = infoBtn(e); if (b && e.pointerType === 'mouse' && !sticky && current === b) hide(); });
+    document.addEventListener('focusin', (e) => { const b = infoBtn(e); if (b && !sticky) show(b); });
+    document.addEventListener('focusout', () => { if (current && !sticky) hide(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && current) hide(); });
+    window.addEventListener('scroll', () => { if (current) hide(); }, true);
+}
+
+/** Fehlende französische Lücken-Lösungen mit dem Wörterbuch vorschlagen */
+async function fillGapsClick() {
+    setStatus('Lade das französische Wörterbuch...');
+    const st = await ensureDicts(['fr']);
+    if (!st.fr) { setStatus('Das französische Wörterbuch konnte nicht geladen werden.', 'error'); return; }
+    const n = fillGapSuggestions('fr');
+    refreshAll();
+    setStatus(n ? `${n} Lücken-Lösungen vorgeschlagen (als „Bitte prüfen“ markiert, alle passenden Formen gelten als richtig).` : 'Es gibt keine fehlenden Lücken-Lösungen, die sich vorschlagen lassen.', n ? 'ok' : 'busy');
+}
+
 /* ================= Init ================= */
 function showError(text) {
     if (!$('main-screen').hidden) setStatus(text, 'error');
@@ -2872,7 +3605,34 @@ function init() {
         if (kind) launchSession(kind, q, practice);
     });
     $('mode-cancel').addEventListener('click', () => { pendingKind = null; $('mode-dialog').close(); });
-    $('flashcard').addEventListener('click', flipCard);
+    // Karteikarten (Übungsmodus)
+    $('flashcard').addEventListener('click', flipOrNext);
+    $('card-next').addEventListener('click', flipOrNext);
+    $('card-quit').addEventListener('click', () => { afterCards = null; backToMain(); });
+
+    // Prüfungen
+    $('exam-new').addEventListener('click', () => openExamDialog(null));
+    $('exam-form').addEventListener('submit', (e) => { e.preventDefault(); saveExam(); });
+    $('ex-cancel').addEventListener('click', () => $('exam-dialog').close());
+    $('pick-form').addEventListener('submit', (e) => { e.preventDefault(); confirmPick(); });
+    $('pick-cancel').addEventListener('click', () => $('pick-dialog').close());
+
+    // Kategorien und Auswahl in den Listen
+    $('select-btn').addEventListener('click', () => setSelectMode(!selectMode));
+    $('sel-cancel').addEventListener('click', () => setSelectMode(false));
+    $('sel-move').addEventListener('click', () => openMoveDialog('items'));
+    $('sel-exam').addEventListener('click', openPickExam);
+    $('sel-delete').addEventListener('click', deleteSelected);
+    $('move-form').addEventListener('submit', (e) => { e.preventDefault(); confirmMove(); });
+    $('mv-cancel').addEventListener('click', () => { moveCtx = null; $('move-dialog').close(); });
+    $('mv-existing').addEventListener('change', (e) => {
+        if (!e.target.value) return;
+        let p = [];
+        try { p = JSON.parse(e.target.value); } catch (err) { /* egal */ }
+        [0, 1, 2].forEach((i) => setVal(`mv-${i + 1}`, p[i] || ''));
+    });
+    on('gaps-fill-btn', 'click', fillGapsClick);
+    setupInfo();
 
     // Einstellungen und Erinnerungen
     ['iv-1', 'iv-2', 'iv-3', 'iv-4', 'iv-5', 'iv-6', 'set-wrong', 'set-goal', 'set-time']
