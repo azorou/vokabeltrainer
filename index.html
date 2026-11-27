@@ -1,345 +1,553 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="auto">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#ffffff">
-    <meta name="description" content="NotenApp: Notenschnitt, Notenverteilung und Punkteschlüssel.">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="NotenApp">
-    <title>NotenApp</title>
+    <meta name="theme-color" content="#3498db">
+    <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="icons/icon-192.png">
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Vokabeltrainer">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Vokabeltrainer</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+    <style>
+        :root { --blue: #3498db; --blue-d: #2980b9; --ink: #2c3e50; --muted: #6b7c8a; --line: #e2e8f0; }
+        * { box-sizing: border-box; }
+        html { -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f4f8; color: #333; margin: 0; min-height: 100dvh;
+            padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+        }
+        .container { background: #fff; padding: 24px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.08); max-width: 920px; margin: 0 auto; }
+        h1 { color: var(--ink); font-size: 26px; margin: 0 0 8px; }
+        h2 { color: var(--ink); font-size: 20px; margin: 4px 0 12px; }
+        h3 { color: var(--ink); font-size: 16px; margin: 0 0 8px; }
+        .lead { color: var(--muted); margin: 0 0 18px; }
+        .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 6px; }
+        .inline-hint { font-weight: normal; font-size: 12px; color: var(--muted); margin-left: 6px; }
+        #login-screen, #trainer-screen, #card-screen, #end-screen { text-align: center; max-width: 560px; margin: 0 auto; }
+
+        /* Buttons */
+        button { font-family: inherit; background: #2ecc71; color: #fff; border: none; padding: 12px 22px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(46,204,113,.2); transition: all .2s; }
+        button:hover { background: #27ae60; transform: translateY(-1px); }
+        button:disabled { opacity: .55; cursor: default; transform: none; }
+        button.block { display: block; width: 100%; margin-top: 14px; }
+        button.nav-btn { background: var(--blue); box-shadow: 0 4px 6px rgba(52,152,219,.2); }
+        button.nav-btn:hover { background: var(--blue-d); }
+        button.secondary { background: #7f8c8d; box-shadow: none; }
+        button.secondary:hover { background: #6c7a7b; }
+        button.danger { background: #c0392b; box-shadow: none; }
+        button.danger:hover { background: #a93226; }
+        button.mini { padding: 6px 12px; font-size: 13px; }
+        button.link-btn { background: none; color: #2980b9; box-shadow: none; text-decoration: underline; font-weight: normal; padding: 8px; }
+        button.link-btn:hover { background: none; transform: none; color: #1c5d8a; }
+        button.icon-btn { background: #eef2f7; color: var(--ink); box-shadow: none; padding: 4px 10px; font-size: 13px; font-weight: normal; }
+        button.icon-btn:hover { background: #dde5ee; transform: none; }
+        .btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+        .btn-row button { flex: 1 1 160px; margin: 0; }
+
+        /* Hilfetext (i) */
+        button.info-btn { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin-left: 6px; border-radius: 50%; background: #dbe7f3; color: var(--blue-d); box-shadow: none; font-size: 12px; font-weight: bold; font-style: italic; font-family: Georgia, serif; vertical-align: middle; line-height: 1; }
+        button.info-btn:hover, button.info-btn[aria-expanded="true"] { background: var(--blue); color: #fff; transform: none; }
+        .info-pop { position: fixed; z-index: 1000; background: #2c3e50; color: #fff; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.45; font-weight: normal; box-shadow: 0 8px 24px rgba(0,0,0,.3); max-width: 300px; text-align: left; }
+        .info-pop[hidden] { display: none; }
+
+        /* Formulare */
+        .field { display: block; text-align: left; margin: 10px 0; }
+        .field > span { display: block; font-size: 13px; color: #4a5568; margin-bottom: 4px; }
+        select, input[type="text"], input[type="password"], input[type="search"], input[type="number"], input[type="time"], input[type="date"] { width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; background: #fff; transition: border-color .2s; }
+        select:focus, input:focus { border-color: var(--blue); }
+        #user-input { max-width: 420px; font-size: 20px; text-align: center; }
+        .check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #4a5568; margin: 10px 0; }
+        .check input { width: 18px; height: 18px; flex: none; }
+        .check-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid #edf2f7; font-size: 15px; cursor: pointer; text-align: left; }
+        .check-row input { width: 18px; height: 18px; flex: none; }
+        fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
+        legend { font-weight: bold; color: var(--ink); padding: 0 6px; font-size: 14px; }
+        .inline-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .path-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .iv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+        /* Kopf, Sprache, Tabs */
+        .app-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+        .brand { margin: 0; font-size: 22px; }
+        .account { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #4a5568; }
+        .sync-state { font-size: 12px; color: var(--muted); }
+        .lang-switch { display: flex; }
+        .lang-switch button { background: #fff; color: var(--ink); border: 2px solid var(--blue); box-shadow: none; padding: 6px 16px; font-size: 14px; border-radius: 0; }
+        .lang-switch button:first-child { border-radius: 8px 0 0 8px; }
+        .lang-switch button:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+        .lang-switch button[aria-pressed="true"] { background: var(--blue); color: #fff; }
+        .tabbar { display: flex; gap: 6px; margin: 0 0 16px; border-bottom: 2px solid var(--line); }
+        button.tab { flex: 1; background: none; color: var(--muted); box-shadow: none; padding: 12px 6px; border-radius: 8px 8px 0 0; border-bottom: 3px solid transparent; font-size: 15px; }
+        button.tab:hover { background: #f4f8fc; transform: none; }
+        button.tab[aria-selected="true"] { color: var(--blue-d); border-bottom-color: var(--blue); }
+
+        .status { font-weight: bold; margin: 0 0 14px; font-size: 15px; line-height: 1.4; }
+        .conflict-box { background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 12px 15px; margin: 0 0 15px; text-align: left; }
+
+        /* Üben */
+        .today, .panel, .set-group { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 0 0 14px; background: #f9fbfd; text-align: left; }
+        .today { border-color: #bcdcf5; background: #eaf4fd; }
+        .today p, .panel p { margin: 0 0 6px; }
+        .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+        .panel-head h3 { margin: 0; }
+        progress { width: 100%; height: 14px; margin-top: 4px; }
+        .phase-row { display: grid; grid-template-columns: 130px 1fr 36px; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
+        .phase-bar { display: block; height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
+        .phase-bar > span { display: block; height: 100%; background: var(--blue); }
+        .phase-count { text-align: right; }
+        #group-list { max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
+        details.manual { background: #f8f9fa; border: 1px solid var(--line); border-radius: 8px; padding: 10px 15px; margin: 0 0 14px; text-align: left; }
+        details.manual summary { cursor: pointer; font-weight: bold; color: var(--ink); }
+        .exam-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid #e2e8f0; }
+        .exam-info { min-width: 0; overflow-wrap: anywhere; }
+        .exam-row .item-actions { align-items: center; }
+
+        /* Dialoge */
+        dialog.mode-dialog { border: none; border-radius: 14px; padding: 20px; max-width: 480px; width: calc(100% - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,.28); color: #333; text-align: left; }
+        dialog.mode-dialog::backdrop { background: rgba(0,0,0,.45); }
+        .mode-options { border: none; padding: 0; margin: 0 0 10px; }
+        .mode-options .check-row { padding: 11px 4px; }
+        #ex-cats { max-height: 32vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; }
+
+        /* Hinzufügen */
+        .upload-zone { display: block; border: 3px dashed var(--blue); padding: 26px 20px; border-radius: 12px; background: #f9fbfd; cursor: pointer; margin-bottom: 12px; text-align: center; transition: all .3s; }
+        .upload-zone:hover { background: #ecf5fc; border-color: var(--blue-d); }
+        .preview-container { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
+        .preview-img { max-width: 80px; max-height: 80px; border-radius: 4px; border: 1px solid #cbd5e1; }
+
+        /* Listen */
+        #list-tree { margin-top: 8px; }
+        .select-bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #fff8e1; border: 1px solid #f0d68a; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+        .select-bar button { padding: 6px 12px; font-size: 13px; }
+        details.sec { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; background: #fff; }
+        details.sec > summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; padding: 10px 12px; font-weight: bold; color: var(--ink); }
+        details.sec details.sec { margin: 8px 10px; }
+        .sec-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .sec-body { padding: 0 8px 8px; }
+        .item { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 6px; border-top: 1px solid #edf2f7; text-align: left; }
+        .item .row-check { width: 20px; height: 20px; margin-top: 3px; flex: none; }
+        .item-main { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+        .item-sent { font-size: 13px; font-style: italic; color: #4a5568; margin-top: 2px; }
+        .item-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+        .item-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: flex-end; flex: none; max-width: 200px; }
+        .fix-note { font-size: 12px; color: #9a6700; background: #fff8e1; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
+        .warn-note { font-size: 12px; color: #9c2b1b; background: #fdecea; border-radius: 4px; padding: 3px 8px; margin-top: 4px; }
+        mark.lowconf { background: #fde2c8; color: inherit; border-radius: 3px; padding: 0 2px; text-decoration: underline wavy #c0392b; text-underline-offset: 3px; }
+        .editor { border: 2px solid var(--blue); border-radius: 8px; padding: 10px 12px; margin: 6px 0; background: #f9fbfd; text-align: left; }
+        .editor .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+        /* Einstellungen */
+        .set-group h3 { margin-bottom: 10px; }
+        .set-group .field:first-of-type { margin-top: 0; }
+
+        /* Abfrage */
+        .phase-badge { background: #34495e; color: #fff; padding: 4px 10px; border-radius: 20px; font-size: 12px; display: inline-block; text-transform: uppercase; letter-spacing: 1px; }
+        .word-display { font-size: 32px; font-weight: bold; color: var(--ink); margin: 25px 0 15px; overflow-wrap: anywhere; }
+        .sentence-box { background: #eef2f7; padding: 18px; border-radius: 8px; font-style: italic; color: #4a5568; margin: 20px 0; line-height: 1.5; font-size: 16px; border-left: 5px solid var(--blue); text-align: left; }
+        .feedback { font-size: 20px; font-weight: bold; margin-top: 20px; }
+        .feedback.correct { color: #1e8449; }
+        .feedback.wrong { color: #c0392b; }
+        .stats-info { margin-top: 20px; font-size: 13px; color: #7f8c8d; }
+
+        /* Karteikarten (Übungsmodus) */
+        button.flashcard { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; width: 100%; min-height: 240px; padding: 24px; margin-top: 18px; background: #fffbea; color: var(--ink); border: 2px solid #e0b84a; border-radius: 16px; box-shadow: 0 6px 16px rgba(0,0,0,.08); font-family: inherit; font-weight: normal; white-space: pre-line; text-align: center; }
+        button.flashcard:hover { background: #fff6d6; transform: none; }
+        button.flashcard[data-flipped="1"] { background: #e8f6ee; border-color: #5fb989; }
+        button.flashcard.flip { animation: flip .35s ease; }
+        .fc-label { font-size: 13px; color: var(--muted); }
+        .fc-text { font-size: 26px; font-weight: bold; line-height: 1.35; overflow-wrap: anywhere; }
+        @keyframes flip { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+        @media (prefers-reduced-motion: reduce) { button.flashcard.flip { animation: none; } }
+
+        [hidden] { display: none !important; }
+        .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        :focus-visible { outline: 3px solid #f39c12; outline-offset: 2px; }
+
+        /* Kamera */
+        .camera-dialog { padding: 0; border: none; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; background: #000; color: #fff; }
+        .camera-dialog[open] { display: flex; flex-direction: column; }
+        .camera-dialog video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; }
+        .cam-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); background: #111; }
+        .cam-bar button { padding: 10px 16px; font-size: 15px; }
+
+        /* PWA-Installation */
+        .install-bar { background: #eaf4fd; border: 1px solid #bcdcf5; border-radius: 8px; padding: 10px 12px; margin-bottom: 15px; font-size: 13px; color: var(--ink); }
+        .install-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+        .install-info { margin: 0; text-align: left; flex: 1 1 240px; }
+        .install-report { text-align: left; margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+
+        /* Mobil */
+        @media (max-width: 700px) {
+            body { padding: 0; }
+            .container { border-radius: 0; box-shadow: none; min-height: 100dvh; padding: calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(90px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
+            .lang-switch { width: 100%; order: 3; }
+            .lang-switch button { flex: 1; }
+            .tabbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; background: #fff; border-top: 1px solid var(--line); border-bottom: none; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); z-index: 20; }
+            button.tab { border-bottom: none; border-top: 3px solid transparent; border-radius: 0; padding: 14px 2px 16px; font-size: 13px; }
+            button.tab[aria-selected="true"] { border-top-color: var(--blue); }
+            .path-grid { grid-template-columns: 1fr; }
+            .iv-grid { grid-template-columns: repeat(2, 1fr); }
+            .phase-row { grid-template-columns: 110px 1fr 30px; }
+            .word-display { font-size: 27px; }
+            .item { flex-wrap: wrap; }
+            .item-actions { justify-content: flex-start; max-width: none; width: 100%; }
+            .exam-row { flex-wrap: wrap; }
+        }
+
+        /* Installierte App */
+        @media (display-mode: standalone) {
+            html, body { overscroll-behavior: none; }
+            body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+            input, textarea, select { -webkit-user-select: text; user-select: text; }
+            #install-bar { display: none !important; }
+        }
+    </style>
 </head>
 <body>
 
-<a class="skip-link" href="#mainContent">Zum Inhalt springen</a>
+<div class="container">
 
-<!-- ANMELDUNG -->
-<div id="authScreen" class="auth-screen">
-    <div class="auth-card">
-        <div class="auth-logo" aria-hidden="true">N</div>
-        <h1 class="app-title auth-title">NotenApp</h1>
-        <p class="app-sub auth-sub">Schnitt, Verteilung &amp; Punkteschlüssel</p>
-
-        <div class="seg seg-full" role="group" aria-label="Anmelden oder registrieren">
-            <button type="button" class="seg-btn active" id="authTab-login" aria-pressed="true" onclick="setAuthMode('login')">Anmelden</button>
-            <button type="button" class="seg-btn" id="authTab-register" aria-pressed="false" onclick="setAuthMode('register')">Registrieren</button>
+    <div id="install-bar" class="install-bar" hidden>
+        <div class="install-row">
+            <button type="button" id="install-btn" class="nav-btn mini" hidden>App installieren</button>
+            <p id="install-info" class="install-info"></p>
+            <button type="button" id="install-check" class="mini secondary">Installation prüfen</button>
+            <button type="button" id="install-dismiss" class="link-btn">Schließen</button>
         </div>
-
-        <form id="authForm" onsubmit="handleAuthSubmit(event)">
-            <div class="field">
-                <label for="authUsername">Benutzername</label>
-                <input type="text" id="authUsername" autocomplete="username" autocapitalize="none" required placeholder="dein_name">
-            </div>
-            <div class="field">
-                <label for="authPassword">Passwort</label>
-                <input type="password" id="authPassword" autocomplete="current-password" required minlength="6" placeholder="Mind. 6 Zeichen">
-            </div>
-            <p class="hint" id="authHint" hidden>Du brauchst keine E-Mail. Merke dir dein Passwort gut, denn ohne E-Mail kann es nicht zurückgesetzt werden.</p>
-            <button type="submit" class="btn btn-primary btn-block" id="authSubmitBtn">Anmelden</button>
-            <div id="authStatus" class="auth-status" role="alert" aria-live="assertive"></div>
-        </form>
+        <ul id="install-report" class="install-report" hidden></ul>
     </div>
-</div>
 
-<!-- HAUPT-APP -->
-<div id="appShell" class="app-shell" style="display:none;">
-    <header class="topbar">
-        <div class="brand">
-            <span class="brand-mark" aria-hidden="true">N</span>
-            <div>
-                <h1 class="app-title">NotenApp</h1>
-                <p class="app-sub" id="userBadge">Angemeldet</p>
+    <!-- LOGIN -->
+    <section id="login-screen">
+        <h1>Vokabeltrainer</h1>
+        <p class="lead">Melde dich an, damit deine Vokabeln auf jedem Gerät verfügbar sind.</p>
+        <form id="login-form">
+            <label class="field"><span>Benutzername</span>
+                <input type="text" id="login-user" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+            </label>
+            <label class="field"><span>Passwort <button type="button" class="info-btn" data-info="Es gibt keine Passwort-Wiederherstellung. Merke dir dein Passwort oder speichere unter Einstellungen eine Sicherung." aria-label="Information" aria-expanded="false">i</button></span>
+                <input type="password" id="login-pass" autocomplete="current-password" required>
+            </label>
+            <button type="submit" class="block nav-btn">Anmelden</button>
+            <button type="button" id="register-btn" class="block secondary">Neues Konto erstellen</button>
+            <button type="button" id="guest-btn" class="link-btn">Ohne Konto fortfahren (nur dieses Gerät)</button>
+        </form>
+        <div id="login-msg" class="status" style="color:#c0392b;margin-top:12px;" role="alert" hidden></div>
+    </section>
+
+    <!-- HAUPTBEREICH -->
+    <section id="main-screen" hidden>
+        <header class="app-header">
+            <h1 class="brand">Vokabeltrainer</h1>
+            <div class="lang-switch" role="group" aria-label="Sprache">
+                <button type="button" class="lang-btn" data-lang="fr" aria-pressed="true">Français</button>
+                <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
             </div>
+            <div class="account">
+                <span id="account-name"></span>
+                <span id="sync-state" class="sync-state" role="status" aria-live="polite"></span>
+                <button type="button" id="logout-btn" class="mini secondary">Abmelden</button>
+            </div>
+        </header>
+
+        <nav class="tabbar" role="tablist" aria-label="Bereiche">
+            <button type="button" role="tab" class="tab" id="tab-learn" data-tab="learn" aria-controls="view-learn" aria-selected="true">Üben</button>
+            <button type="button" role="tab" class="tab" id="tab-lists" data-tab="lists" aria-controls="view-lists" aria-selected="false">Listen</button>
+            <button type="button" role="tab" class="tab" id="tab-add" data-tab="add" aria-controls="view-add" aria-selected="false">Hinzufügen</button>
+            <button type="button" role="tab" class="tab" id="tab-settings" data-tab="settings" aria-controls="view-settings" aria-selected="false">Einstellungen</button>
+        </nav>
+
+        <div id="conflict-box" class="conflict-box" role="alertdialog" aria-labelledby="conflict-title" tabindex="-1" hidden>
+            <strong id="conflict-title">Auf einem anderen Gerät wurde die Liste geändert.</strong>
+            <p id="conflict-text"></p>
+            <button type="button" id="cf-merge" class="block nav-btn">Zusammenführen (fehlende Vokabeln ergänzen)</button>
+            <button type="button" id="cf-cloud" class="block secondary">Cloud-Version übernehmen</button>
+            <button type="button" id="cf-local" class="block secondary">Version dieses Geräts behalten</button>
         </div>
-        <button type="button" class="icon-btn" onclick="openDialog('menuDialog')" aria-label="Menü öffnen" aria-haspopup="dialog">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
-        </button>
-    </header>
 
-    <main id="mainContent" class="main-content" tabindex="-1">
+        <div id="status-text" class="status" role="status" aria-live="polite" hidden></div>
 
-        <!-- TAB 1: FÄCHER -->
-        <section id="view-subjects" class="tab-view active" aria-labelledby="h-subjects">
-            <div class="hero-summary">
-                <div class="hero-metric">
-                    <span class="hero-label">Gesamtschnitt</span>
-                    <strong class="hero-value" id="overallAvgAll">–</strong>
-                    <small class="hero-meta" id="overallMetaAll">Keine Noten</small>
-                </div>
-                <div class="hero-divider"></div>
-                <div class="hero-metric">
-                    <span class="hero-label">Vorrückung</span>
-                    <strong class="hero-value accent" id="overallAvgAdv">–</strong>
-                    <small class="hero-meta" id="overallMetaAdv">Ohne „Kein Vorrückungsfach“</small>
-                </div>
-            </div>
+        <!-- ÜBEN -->
+        <div id="view-learn" role="tabpanel" aria-labelledby="tab-learn">
+            <h2>Üben</h2>
+            <p id="learn-empty" class="lead" hidden>Noch keine Vokabeln in dieser Sprache. Füge im Tab „Hinzufügen“ Screenshots oder Fotos hinzu.</p>
+            <div id="learn-body">
 
-            <div class="section-head">
-                <h2 id="h-subjects">Meine Fächer</h2>
-                <button type="button" class="btn btn-primary" onclick="openDialog('addSubjectDialog')">+ Fach</button>
-            </div>
+                <section class="today" aria-labelledby="today-title">
+                    <h3 id="today-title">Heute <button type="button" class="info-btn" data-info="Tägliche Übung wie bei Phase 6: Alle neuen Vokabeln und alle, deren Wiederholungstermin erreicht ist. Richtig beantwortete Vokabeln steigen eine Phase auf und kommen später wieder, falsche beginnen von vorn." aria-label="Information" aria-expanded="false">i</button></h3>
+                    <p id="today-summary"></p>
+                    <label for="goal-bar" class="sr-only">Tagesziel</label>
+                    <progress id="goal-bar" value="0" max="20"></progress>
+                    <span id="goal-text" class="hint"></span>
+                    <span id="streak-text" class="hint"></span>
+                    <button type="button" id="daily-btn" class="block nav-btn">Tägliche Übung starten</button>
+                </section>
 
-            <div id="subjectsContainer"></div>
-        </section>
-
-        <!-- TAB 2: VERTEILUNG -->
-        <section id="view-distribution" class="tab-view" aria-labelledby="h-dist">
-            <div class="section-head">
-                <h2 id="h-dist">Notenverteilung</h2>
-            </div>
-            <p class="section-desc">Welche Verteilungen passen zu Schnitt und Anzahl einer Arbeit?</p>
-
-            <div class="card">
-                <div class="form-grid-2">
-                    <div class="field">
-                        <label for="distN">Arbeiten (N)</label>
-                        <input type="number" id="distN" min="1" max="60" step="1" inputmode="numeric" placeholder="25" oninput="scheduleDist()">
+                <section class="panel" aria-labelledby="exam-heading">
+                    <div class="panel-head">
+                        <h3 id="exam-heading">Prüfungen <button type="button" class="info-btn" data-info="Lege eine Prüfung mit Datum und Vokabeln an. Bis dahin werden diese Vokabeln jeden Tag abgefragt. Schwache Vokabeln öfter, sichere seltener. Die Prüfungsliste bleibt unsichtbar und hat eine eigene Wertung." aria-label="Information" aria-expanded="false">i</button></h3>
+                        <button type="button" id="exam-new" class="mini nav-btn">Neue Prüfung</button>
                     </div>
-                    <div class="field">
-                        <label for="distAvg">Schnitt (Ø)</label>
-                        <input type="text" id="distAvg" inputmode="decimal" placeholder="2,68" oninput="scheduleDist()">
+                    <p id="exam-empty" class="hint">Noch keine Prüfung angelegt.</p>
+                    <div id="exam-list"></div>
+                </section>
+
+                <section class="panel" aria-labelledby="more-title">
+                    <h3 id="more-title">Weitere Übungen <button type="button" class="info-btn" data-info="Freies Üben ändert die Phasen nicht. Problem-Vokabeln sind Vokabeln mit mindestens 2 Fehlern, die noch nicht 3-mal in Folge richtig waren." aria-label="Information" aria-expanded="false">i</button></h3>
+                    <div class="btn-row">
+                        <button type="button" id="start-btn" class="secondary">Freies Üben</button>
+                        <button type="button" id="trouble-btn" class="secondary">Problem-Vokabeln</button>
                     </div>
-                </div>
-                <div class="field">
-                    <label for="distKnown">Bekannte Noten <span class="label-hint">(optional, Ziffern 1–6)</span></label>
-                    <input type="text" id="distKnown" inputmode="numeric" placeholder="312243" oninput="scheduleDist()">
-                </div>
-                <div class="field">
-                    <label for="distSigma">Streuung: <strong id="distSigmaVal">1,00</strong></label>
-                    <input type="range" id="distSigma" min="0.55" max="1.75" step="0.05" value="1.00" oninput="scheduleDist()">
-                </div>
+                </section>
 
-                <details class="panel">
-                    <summary>Filter &amp; Bedingungen</summary>
-                    <div class="panel-body">
-                        <div class="form-grid-2">
-                            <div class="field">
-                                <label for="distSkewFilter">Tendenz</label>
-                                <select id="distSkewFilter" onchange="scheduleDist()">
-                                    <option value="any">Alle</option>
-                                    <option value="light">Eher leicht (1–3)</option>
-                                    <option value="balanced">Ausgeglichen</option>
-                                    <option value="heavy">Eher schwer (4–6)</option>
-                                </select>
-                            </div>
-                            <div class="field">
-                                <label for="distSpreadFilter">Streuung</label>
-                                <select id="distSpreadFilter" onchange="scheduleDist()">
-                                    <option value="any">Alle</option>
-                                    <option value="tight">Eng</option>
-                                    <option value="medium">Mittel</option>
-                                    <option value="wide">Weit</option>
-                                </select>
-                            </div>
-                        </div>
+                <details class="manual" id="progress-box">
+                    <summary>Fortschritt nach Phasen</summary>
+                    <div id="phase-bars" style="margin-top:10px;"></div>
+                </details>
 
-                        <span class="setting-label">Schnellauswahl</span>
-                        <div class="toolbar">
-                            <button type="button" class="btn btn-sm" onclick="applyDistPreset('all')">Alle 1–6</button>
-                            <button type="button" class="btn btn-sm" onclick="applyDistPreset('no6')">Keine 6</button>
-                            <button type="button" class="btn btn-sm" onclick="applyDistPreset('no56')">Keine 5 &amp; 6</button>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="applyDistPreset('reset')">Zurücksetzen</button>
-                        </div>
-
-                        <span class="setting-label">Pro Note</span>
-                        <p class="hint">Tippen wechselt: ? offen → ≥1× muss vorkommen → 0× ausgeschlossen.</p>
-                        <div class="grid-6" id="distCatGrid"></div>
-                        <span class="setting-label" style="margin-top:12px;">Genaue Anzahl (optional)</span>
-                        <div class="grid-6" id="distExactGrid"></div>
+                <details class="manual" id="area-box">
+                    <summary>Bereiche auswählen <span id="sel-count" class="inline-hint"></span></summary>
+                    <div class="inline-tools" style="margin-top:10px;">
+                        <button type="button" id="sel-all" class="mini secondary">Alle</button>
+                        <button type="button" id="sel-none" class="mini secondary">Keine</button>
                     </div>
+                    <div id="group-list"></div>
                 </details>
             </div>
+        </div>
 
-            <div id="distOutput" aria-live="polite"></div>
-        </section>
-
-        <!-- TAB 3: WERKZEUGE -->
-        <section id="view-tools" class="tab-view" aria-labelledby="h-tools">
-            <div class="section-head">
-                <h2 id="h-tools">Werkzeuge</h2>
+        <!-- LISTEN -->
+        <div id="view-lists" role="tabpanel" aria-labelledby="tab-lists" hidden>
+            <h2>Listen</h2>
+            <label class="field"><span class="sr-only">Suchen</span>
+                <input type="search" id="list-search" placeholder="Suchen (Wort, Übersetzung, Satz)..." autocomplete="off">
+            </label>
+            <div class="inline-tools">
+                <button type="button" id="select-btn" class="mini nav-btn">Auswählen</button>
+                <button type="button" id="expand-btn" class="mini secondary">Alle öffnen</button>
+                <button type="button" id="collapse-btn" class="mini secondary">Alle schließen</button>
             </div>
-
-            <div class="seg seg-full" role="group" aria-label="Werkzeug wählen">
-                <button type="button" class="seg-btn active" data-tool="key" aria-pressed="true" onclick="switchTool('key')">Punkteschlüssel</button>
-                <button type="button" class="seg-btn" data-tool="compare" aria-pressed="false" onclick="switchTool('compare')">Vergleich</button>
+            <div id="select-bar" class="select-bar" hidden>
+                <strong id="select-count">0 ausgewählt</strong>
+                <button type="button" id="sel-move" class="nav-btn" disabled>Verschieben</button>
+                <button type="button" id="sel-exam" class="secondary" disabled>Zur Prüfung</button>
+                <button type="button" id="sel-delete" class="danger" disabled>Löschen</button>
+                <button type="button" id="sel-cancel" class="secondary">Fertig</button>
             </div>
+            <label class="check"><input type="checkbox" id="only-warn"> Nur Einträge zeigen, die geprüft werden sollten <span id="warn-count" class="inline-hint"></span>
+                <button type="button" class="info-btn" data-info="Unsicher gelesene Wörter sind orange unterlegt. Mit „Geprüft“ nimmst du die Markierung weg, mit „Bearbeiten“ korrigierst du den Eintrag." aria-label="Information" aria-expanded="false">i</button></label>
+            <p id="list-empty" class="lead" hidden></p>
+            <div id="list-tree"></div>
+        </div>
 
-            <div class="card tool-panel" data-tool="key">
-                <div class="form-grid-2">
-                    <div class="field">
-                        <label for="keyMaxPts">Maximalpunkte</label>
-                        <input type="number" id="keyMaxPts" min="0.5" step="0.5" inputmode="decimal" placeholder="60" oninput="syncKeyFromMax()">
-                    </div>
-                    <div class="field">
-                        <label for="keyGotPts">Eigene Punkte</label>
-                        <input type="number" id="keyGotPts" min="0" step="0.5" inputmode="decimal" placeholder="46" oninput="renderKeyTable()">
-                    </div>
+        <!-- HINZUFÜGEN -->
+        <div id="view-add" role="tabpanel" aria-labelledby="tab-add" hidden>
+            <h2>Hinzufügen</h2>
+            <fieldset>
+                <legend>Kategorie für neue Vokabeln <button type="button" class="info-btn" data-info="Leer lassen: Die Kategorien werden aus Seitenköpfen und Überschriften erkannt (Unité, Volet, Module, Unit, Across cultures, Focus, Texts ...). Wenn du etwas einträgst, wird dort begonnen. Soll alles in diese Kategorie, schalte die automatische Erkennung unten ab. Es gibt bis zu 3 Ebenen." aria-label="Information" aria-expanded="false">i</button></legend>
+                <div class="path-grid">
+                    <label class="field"><span>Ebene 1 (z. B. Unité 1)</span><input type="text" id="path-1" list="dl-1" autocomplete="off"></label>
+                    <label class="field"><span>Ebene 2 (z. B. Volet 2)</span><input type="text" id="path-2" list="dl-2" autocomplete="off"></label>
+                    <label class="field"><span>Ebene 3 (optional)</span><input type="text" id="path-3" list="dl-3" autocomplete="off"></label>
                 </div>
-                <div id="keySummary" aria-live="polite"></div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th scope="col">Note</th>
-                                <th scope="col">Ab %</th>
-                                <th scope="col">Ab Punkte</th>
-                                <th scope="col">Grenze</th>
-                            </tr>
-                        </thead>
-                        <tbody id="keyTableBody"></tbody>
-                    </table>
-                </div>
-                <div class="key-foot">
-                    <p class="hint">Mit „Fix“ bleibt eine Grenze beim Anpassen der anderen unverändert.</p>
-                    <button type="button" class="btn btn-sm" onclick="resetKeyTable()">Standard</button>
-                </div>
-            </div>
+                <label class="check"><input type="checkbox" id="autodetect" checked> Kategorien automatisch erkennen</label>
+            </fieldset>
 
-            <div class="card tool-panel" data-tool="compare" hidden>
-                <p class="section-desc" style="margin-top:0;">Zwei Notenreihen direkt gegenüberstellen.</p>
-                <div class="form-grid-2">
-                    <div class="field">
-                        <label for="cmpA">Reihe A</label>
-                        <input type="text" id="cmpA" inputmode="numeric" placeholder="122334" oninput="updateComparison()">
-                    </div>
-                    <div class="field">
-                        <label for="cmpB">Reihe B</label>
-                        <input type="text" id="cmpB" inputmode="numeric" placeholder="223344" oninput="updateComparison()">
-                    </div>
-                </div>
-                <div id="cmpOutput" aria-live="polite"></div>
-            </div>
-        </section>
+            <label class="upload-zone" for="file-input" id="upload-zone" tabindex="0">
+                <strong>Screenshots oder Fotos auswählen</strong>
+                <span class="hint">PNG, JPEG und andere Bildformate, mehrere Bilder möglich, auch per Drag &amp; Drop</span>
+                <span class="preview-container" id="preview-box"></span>
+            </label>
+            <input type="file" id="file-input" class="sr-only" accept="image/*" multiple>
+            <button type="button" id="camera-btn" class="block nav-btn">Seiten mit der Kamera aufnehmen</button>
+            <input type="file" id="cam-input" class="sr-only" accept="image/*" capture="environment">
+            <label class="check"><input type="checkbox" id="autofix" checked> Automatische Korrektur
+                <button type="button" class="info-btn" data-info="Korrigiert Lesefehler mit Wörterbuch und Kontext (z. B. rn statt m, fehlende Akzente) und schlägt fehlende Lücken-Lösungen vor. Geänderte Einträge sind markiert." aria-label="Information" aria-expanded="false">i</button></label>
+            <label class="check"><input type="checkbox" id="autosplit" checked> Doppelseiten automatisch teilen
+                <button type="button" class="info-btn" data-info="Bilder im Querformat mit zwei Buchseiten werden in der Mitte geteilt. Bei einer einzelnen Seite im Querformat abschalten." aria-label="Information" aria-expanded="false">i</button></label>
 
-        <!-- TAB 4: VERLAUF -->
-        <section id="view-archive" class="tab-view" aria-labelledby="h-archive">
-            <div class="section-head">
-                <h2 id="h-archive">Verlauf</h2>
-            </div>
-            <div class="card">
-                <label for="archiveName">Aktuellen Stand speichern</label>
-                <div class="save-row">
-                    <input type="text" id="archiveName" placeholder="Name, z. B. Halbjahr 1">
-                    <button type="button" class="btn btn-primary" onclick="saveFullSnapshot()">Speichern</button>
-                </div>
-            </div>
-            <div id="archiveList"></div>
-        </section>
-    </main>
+            <details class="manual" id="manual-box" style="margin-top:16px;">
+                <summary>Vokabel manuell hinzufügen</summary>
+                <form id="manual-form">
+                    <label class="field"><span id="m-term-label">Französisch</span><input type="text" id="m-term" autocomplete="off" required></label>
+                    <label class="field"><span>Deutsch</span><input type="text" id="m-de" autocomplete="off" required></label>
+                    <label class="field"><span>Beispielsatz (optional) <button type="button" class="info-btn" data-info="Die Lücke im Satz mit _____ markieren. Die Lösung(en) trägst du im nächsten Feld ein, mehrere mit Semikolon trennen." aria-label="Information" aria-expanded="false">i</button></span><input type="text" id="m-sent" autocomplete="off"></label>
+                    <label class="field"><span>Lücken-Lösung(en) (optional)</span><input type="text" id="m-gaps" autocomplete="off"></label>
+                    <button type="submit" class="block nav-btn">Hinzufügen</button>
+                </form>
+            </details>
+        </div>
 
-    <nav class="bottom-nav" aria-label="Hauptnavigation">
-        <button type="button" class="nav-btn active" data-tab="subjects" aria-current="page" onclick="switchTab('subjects')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 19.5A2 2 0 0 0 6 21.5h13"/></svg>
-            <span>Fächer</span>
+        <!-- EINSTELLUNGEN -->
+        <div id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+            <h2>Einstellungen</h2>
+
+            <section class="set-group" aria-labelledby="set-phases">
+                <h3 id="set-phases">Lernphasen <button type="button" class="info-btn" data-info="Abstand in Tagen, bis eine Vokabel in der jeweiligen Phase wieder abgefragt wird. 0 bedeutet sofort. Richtig = nächste Phase, falsch = zurück." aria-label="Information" aria-expanded="false">i</button></h3>
+                <div class="iv-grid">
+                    <label class="field"><span>Phase 1 (Tage)</span><input type="number" id="iv-1" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 2 (Tage)</span><input type="number" id="iv-2" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 3 (Tage)</span><input type="number" id="iv-3" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 4 (Tage)</span><input type="number" id="iv-4" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 5 (Tage)</span><input type="number" id="iv-5" min="0" max="365" inputmode="numeric"></label>
+                    <label class="field"><span>Phase 6 (Tage)</span><input type="number" id="iv-6" min="0" max="365" inputmode="numeric"></label>
+                </div>
+                <label class="field"><span>Bei einem Fehler</span>
+                    <select id="set-wrong">
+                        <option value="reset">Zurück in Phase 1</option>
+                        <option value="back">Nur eine Phase zurück</option>
+                    </select>
+                </label>
+            </section>
+
+            <section class="set-group" aria-labelledby="set-goal-title">
+                <h3 id="set-goal-title">Tagesziel <button type="button" class="info-btn" data-info="So viele Vokabeln willst du pro Tag abfragen. Der Fortschrittsbalken auf der Startseite zeigt es an." aria-label="Information" aria-expanded="false">i</button></h3>
+                <label class="field"><span>Abfragen pro Tag</span><input type="number" id="set-goal" min="1" max="500" inputmode="numeric"></label>
+            </section>
+
+            <section class="set-group" aria-labelledby="set-remind">
+                <h3 id="set-remind">Erinnerung <button type="button" class="info-btn" data-info="Eine Benachrichtigung zur gewählten Uhrzeit, wenn Vokabeln fällig sind (höchstens einmal pro Tag). Braucht ein Konto. Auf dem iPhone nur in der installierten App." aria-label="Information" aria-expanded="false">i</button></h3>
+                <span id="push-info" class="hint" role="status" aria-live="polite"></span>
+                <label class="field"><span>Uhrzeit</span><input type="time" id="set-time" value="18:00"></label>
+                <button type="button" id="push-toggle" class="block nav-btn" data-state="off">Benachrichtigungen einschalten</button>
+                <button type="button" id="push-test" class="block secondary" disabled>Testnachricht senden</button>
+            </section>
+
+            <section class="set-group" aria-labelledby="set-data">
+                <h3 id="set-data">Daten <button type="button" class="info-btn" data-info="Die Sicherung ist eine Datei mit allen Vokabeln, Phasen und Prüfungen. Mit „Lücken-Lösungen vorschlagen“ ergänzt das Wörterbuch fehlende Lösungen bei französischen Lückensätzen." aria-label="Information" aria-expanded="false">i</button></h3>
+                <div class="tools">
+                    <button type="button" id="export-btn" class="secondary">Sicherung speichern</button>
+                    <button type="button" id="import-btn" class="secondary">Sicherung laden</button>
+                    <button type="button" id="gaps-fill-btn" class="secondary">Lücken-Lösungen vorschlagen</button>
+                    <button type="button" id="clear-btn" class="danger" hidden>Liste leeren</button>
+                </div>
+                <input type="file" id="import-input" class="sr-only" accept="application/json,.json">
+            </section>
+
+            <button type="button" id="settings-reset" class="mini secondary">Alle Einstellungen auf Standard</button>
+        </div>
+    </section>
+
+    <!-- ABFRAGE -->
+    <section id="trainer-screen" hidden>
+        <span class="phase-badge" id="phase-title">Abfrage</span>
+        <div class="word-display" id="question-display">-</div>
+        <div class="sentence-box" id="sentence-box" hidden></div>
+        <label for="user-input" class="sr-only">Deine Antwort</label>
+        <input type="text" id="user-input" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="button" id="action-btn" class="block">Antwort prüfen</button>
+        <div class="feedback" id="feedback-display" role="status" aria-live="polite"></div>
+        <div class="stats-info" id="stats-display"></div>
+        <button type="button" id="quit-btn" class="link-btn">Abbrechen und zurück</button>
+    </section>
+
+    <!-- KARTEIKARTEN (Übungsmodus) -->
+    <section id="card-screen" hidden>
+        <span class="phase-badge" id="card-title">Karteikarten</span>
+        <button type="button" id="flashcard" class="flashcard" data-flipped="0" aria-pressed="false">
+            <span id="fc-label" class="fc-label"></span>
+            <span id="fc-text" class="fc-text"></span>
         </button>
-        <button type="button" class="nav-btn" data-tab="distribution" onclick="switchTab('distribution')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>
-            <span>Verteilung</span>
-        </button>
-        <button type="button" class="nav-btn" data-tab="tools" onclick="switchTab('tools')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
-            <span>Werkzeuge</span>
-        </button>
-        <button type="button" class="nav-btn" data-tab="archive" onclick="switchTab('archive')">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-            <span>Verlauf</span>
-        </button>
-    </nav>
+        <div class="stats-info" id="card-progress" role="status" aria-live="polite"></div>
+        <button type="button" id="card-next" class="block nav-btn" hidden>Weiter</button>
+        <button type="button" id="card-quit" class="link-btn">Abbrechen und zurück</button>
+    </section>
+
+    <!-- ENDE -->
+    <section id="end-screen" hidden>
+        <h1>Geschafft</h1>
+        <p id="end-text"></p>
+        <button type="button" id="restart-btn" class="block nav-btn">Nochmal</button>
+        <button type="button" id="back-btn" class="block secondary">Zurück zur Übersicht</button>
+    </section>
 </div>
 
-<!-- DIALOG: FACH HINZUFÜGEN -->
-<dialog id="addSubjectDialog" class="sheet" aria-labelledby="addTitle">
-    <div class="sheet-body">
-        <div class="sheet-head">
-            <h2 id="addTitle">Fach hinzufügen</h2>
-            <button type="button" class="icon-btn" onclick="closeDialog('addSubjectDialog')" aria-label="Schließen">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-            </button>
+<!-- Frageart wählen (vor jeder Übung) -->
+<dialog id="mode-dialog" class="mode-dialog" aria-labelledby="mode-title">
+    <form id="mode-form">
+        <h3 id="mode-title">Wie möchtest du üben?</h3>
+        <p class="hint" id="mode-count" style="margin:0 0 10px;"></p>
+        <fieldset class="mode-options">
+            <legend class="sr-only">Frageart</legend>
+            <label class="check-row"><input type="radio" name="qmode" value="translate" checked><span id="mo-translate"></span></label>
+            <label class="check-row"><input type="radio" name="qmode" value="reverse"><span id="mo-reverse"></span></label>
+            <label class="check-row"><input type="radio" name="qmode" value="gap"><span id="mo-gap"></span></label>
+            <label class="check-row"><input type="radio" name="qmode" value="mixed"><span id="mo-mixed"></span></label>
+        </fieldset>
+        <label class="check"><input type="checkbox" id="mode-practice"> Übungsmodus (Karteikarten vorab)
+            <button type="button" class="info-btn" data-info="Zeigt zuerst alle Vokabeln in Phase 1 als Karteikarten: Karte umdrehen (Tippen oder Enter), dann weiter (Tippen, Button oder Enter). Ohne Wertung. Danach folgt die normale Abfrage." aria-label="Information" aria-expanded="false">i</button></label>
+        <button type="submit" class="block nav-btn">Starten</button>
+        <button type="button" id="mode-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
+
+<!-- Prüfung anlegen / bearbeiten -->
+<dialog id="exam-dialog" class="mode-dialog" aria-labelledby="exam-title">
+    <form id="exam-form">
+        <h3 id="exam-title">Neue Prüfung</h3>
+        <label class="field"><span>Name</span><input type="text" id="ex-name" maxlength="60" autocomplete="off" required></label>
+        <label class="field"><span>Datum der Prüfung</span><input type="date" id="ex-date" required></label>
+        <div class="field"><span>Vokabeln (Kategorien) <button type="button" class="info-btn" data-info="Wähle die Kategorien, aus denen die Prüfung kommt. Einzelne Vokabeln fügst du später in den Listen mit „Auswählen“ und „Zur Prüfung“ hinzu." aria-label="Information" aria-expanded="false">i</button></span>
+            <div id="ex-cats"></div>
         </div>
+        <label class="check"><input type="checkbox" id="ex-affect"> Auch die Lernphasen anpassen
+            <button type="button" class="info-btn" data-info="Aus: Die Prüfungsübung zählt nur für diese Prüfung. An: Richtige und falsche Antworten verschieben die Vokabeln zusätzlich in den normalen Lernphasen." aria-label="Information" aria-expanded="false">i</button></label>
+        <p id="ex-msg" class="status" style="color:#c0392b;" role="alert" hidden></p>
+        <button type="submit" class="block nav-btn">Speichern</button>
+        <button type="button" id="ex-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
 
-        <h3 class="sheet-sub">Vorlagen</h3>
-        <div class="preset-grid" id="presetSubjectsGrid"></div>
+<!-- Vokabeln zu einer Prüfung hinzufügen -->
+<dialog id="pick-dialog" class="mode-dialog" aria-labelledby="pick-title">
+    <form id="pick-form">
+        <h3 id="pick-title">Zu welcher Prüfung?</h3>
+        <label class="field"><span>Prüfung</span><select id="pick-exam"></select></label>
+        <button type="submit" class="block nav-btn">Hinzufügen</button>
+        <button type="button" id="pick-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
 
-        <h3 class="sheet-sub">Eigenes Fach</h3>
-        <form onsubmit="event.preventDefault(); addSubject();">
-            <div class="field">
-                <label for="newSubName">Name</label>
-                <input type="text" id="newSubName" placeholder="z. B. Latein" autocomplete="off">
-            </div>
-            <div class="form-grid-2">
-                <div class="field">
-                    <label for="newSubType">Art</label>
-                    <select id="newSubType" onchange="toggleNewSubDefaults()">
-                        <option value="haupt">Hauptfach</option>
-                        <option value="neben">Nebenfach</option>
-                    </select>
-                </div>
-                <div class="field">
-                    <label for="newSubRatio">Verhältnis SA : LN</label>
-                    <select id="newSubRatio">
-                        <option value="2:1">2 : 1</option>
-                        <option value="1:1">1 : 1</option>
-                    </select>
-                </div>
-            </div>
-            <label class="checkbox-row" style="margin-bottom:12px;">
-                <input type="checkbox" id="newSubNotAdv">
-                <span>Kein Vorrückungsfach</span>
-            </label>
-            <button type="submit" class="btn btn-primary btn-block">Fach anlegen</button>
-        </form>
+<!-- Kategorie oder Vokabeln verschieben -->
+<dialog id="move-dialog" class="mode-dialog" aria-labelledby="mv-title">
+    <form id="move-form">
+        <h3 id="mv-title">Verschieben</h3>
+        <p style="margin:0 0 8px;">Ziel-Kategorie <button type="button" id="mv-info" class="info-btn" data-info="" aria-label="Information" aria-expanded="false">i</button></p>
+        <label class="field"><span class="sr-only">Bestehende Kategorie</span><select id="mv-existing"></select></label>
+        <label class="field"><span>Ebene 1</span><input type="text" id="mv-1" list="dl-1" autocomplete="off"></label>
+        <label class="field"><span>Ebene 2</span><input type="text" id="mv-2" list="dl-2" autocomplete="off"></label>
+        <label class="field"><span>Ebene 3</span><input type="text" id="mv-3" list="dl-3" autocomplete="off"></label>
+        <p id="mv-msg" class="status" style="color:#c0392b;" role="alert" hidden></p>
+        <button type="submit" class="block nav-btn">Verschieben</button>
+        <button type="button" id="mv-cancel" class="block secondary">Abbrechen</button>
+    </form>
+</dialog>
+
+<!-- Kamera -->
+<dialog id="camera-dialog" class="camera-dialog" aria-label="Kamera">
+    <video id="camera-video" autoplay playsinline muted></video>
+    <div class="cam-bar">
+        <span id="cam-count" role="status" aria-live="polite">0 Fotos</span>
+        <button type="button" id="cam-shot">Aufnehmen</button>
+        <button type="button" id="cam-done" class="nav-btn">Fertig, scannen</button>
+        <button type="button" id="cam-cancel" class="secondary">Abbrechen</button>
     </div>
 </dialog>
 
-<!-- DIALOG: MENÜ -->
-<dialog id="menuDialog" class="sheet" aria-labelledby="menuTitle">
-    <div class="sheet-body">
-        <div class="sheet-head">
-            <h2 id="menuTitle">Menü</h2>
-            <button type="button" class="icon-btn" onclick="closeDialog('menuDialog')" aria-label="Schließen">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-            </button>
-        </div>
+<div id="info-pop" class="info-pop" role="tooltip" hidden></div>
 
-        <p class="hint">Angemeldet als <strong id="menuUser">–</strong></p>
+<datalist id="dl-1"></datalist>
+<datalist id="dl-2"></datalist>
+<datalist id="dl-3"></datalist>
 
-        <div class="menu-group">
-            <span class="setting-label" id="themeLabel">Darstellung</span>
-            <div class="seg seg-full" role="group" aria-labelledby="themeLabel">
-                <button type="button" class="seg-btn" data-theme-opt="auto" aria-pressed="true" onclick="setTheme('auto')">Auto</button>
-                <button type="button" class="seg-btn" data-theme-opt="light" aria-pressed="false" onclick="setTheme('light')">Hell</button>
-                <button type="button" class="seg-btn" data-theme-opt="dark" aria-pressed="false" onclick="setTheme('dark')">Dunkel</button>
-            </div>
-        </div>
-
-        <div class="menu-group">
-            <span class="setting-label">App</span>
-            <button type="button" class="btn btn-block" id="installBtn" style="display:none;">App installieren</button>
-            <p class="hint">iPhone/iPad: Teilen → „Zum Home-Bildschirm“.</p>
-        </div>
-
-        <button type="button" class="btn btn-danger btn-block" onclick="handleLogout()">Abmelden</button>
-    </div>
-</dialog>
-
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
-
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js"></script>
 <script src="app.js"></script>
-<script>
-    if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-            navigator.serviceWorker.register("./sw.js").catch(() => {});
-        });
-    }
-</script>
 </body>
 </html>
